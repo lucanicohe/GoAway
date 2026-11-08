@@ -1,13 +1,16 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
-using System.Collections.Generic;
-using System.Reflection;
+using UnityEngine.Rendering;
 
 public class ThermalChanger : MonoBehaviour
 {
     [Header("Cameras")]
     [SerializeField] private Camera mainCamera;
     [SerializeField] private Camera thermalCamera;
+
+    [Header("Post Processing Volumes")]
+    [SerializeField] private Volume normalVolume;
+    [SerializeField] private Volume thermalVolume;
 
     [Header("Monster Materials")]
     [SerializeField] private Renderer monsterRenderer;
@@ -19,64 +22,12 @@ public class ThermalChanger : MonoBehaviour
     private float originalFogDensity;
     private float originalReflectionIntensity;
 
-    private class PostProcessState
-    {
-        public Behaviour component;
-        public bool originalEnabled;
-        public PropertyInfo property;
-        public bool originalPropertyValue;
-    }
-
-    private readonly List<PostProcessState> postProcessStates =
-        new List<PostProcessState>();
-
     private void Start()
     {
-        // Save original environment values
         originalFogDensity = RenderSettings.fogDensity;
         originalReflectionIntensity = RenderSettings.reflectionIntensity;
 
-        // Find main camera post-processing automatically
-        Behaviour[] components = mainCamera.GetComponents<Behaviour>();
-
-        foreach (Behaviour component in components)
-        {
-            if (component == null)
-                continue;
-
-            string typeName = component.GetType().Name;
-
-            PostProcessState state = new PostProcessState();
-            state.component = component;
-            state.originalEnabled = component.enabled;
-
-            // Built-in Post Processing
-            if (typeName == "PostProcessLayer")
-            {
-                postProcessStates.Add(state);
-                continue;
-            }
-
-            // URP / HDRP camera post-processing
-            PropertyInfo property = component.GetType().GetProperty(
-                "renderPostProcessing",
-                BindingFlags.Public | BindingFlags.Instance
-            );
-
-            if (property != null &&
-                property.PropertyType == typeof(bool) &&
-                property.CanRead &&
-                property.CanWrite)
-            {
-                state.property = property;
-                state.originalPropertyValue =
-                    (bool)property.GetValue(component);
-
-                postProcessStates.Add(state);
-            }
-        }
-
-        // START IN THERMAL MODE
+        // Start in thermal mode
         ApplyThermalMode();
     }
 
@@ -97,57 +48,37 @@ public class ThermalChanger : MonoBehaviour
 
     private void ApplyThermalMode()
     {
-        // Monster thermal material
+        // Monster material
         monsterRenderer.sharedMaterial = thermalMaterial;
+
+        // Post processing
+        thermalVolume.enabled = true;
+        normalVolume.enabled = false;
 
         // Fog ON
         RenderSettings.fog = true;
         RenderSettings.fogDensity = originalFogDensity;
 
-        // Post Processing ON
-        foreach (PostProcessState state in postProcessStates)
-        {
-            if (state.component == null)
-                continue;
-
-            state.component.enabled = state.originalEnabled;
-
-            if (state.property != null)
-                state.property.SetValue(
-                    state.component,
-                    state.originalPropertyValue
-                );
-        }
-
-        // Full environment reflections
-        RenderSettings.reflectionIntensity =
-            originalReflectionIntensity;
+        // Full reflections
+        RenderSettings.reflectionIntensity = originalReflectionIntensity;
 
         // Thermal camera ON
         thermalCamera.gameObject.SetActive(true);
 
-        Debug.Log("THERMAL MODE ACTIVATED");
+        Debug.Log("THERMAL MODE");
     }
 
     private void ApplyNormalMode()
     {
-        // Monster normal material
+        // Monster material
         monsterRenderer.sharedMaterial = normalMaterial;
+
+        // Post processing
+        normalVolume.enabled = true;
+        thermalVolume.enabled = false;
 
         // Fog OFF
         RenderSettings.fog = false;
-
-        // Post Processing OFF
-        foreach (PostProcessState state in postProcessStates)
-        {
-            if (state.component == null)
-                continue;
-
-            if (state.property != null)
-                state.property.SetValue(state.component, false);
-            else
-                state.component.enabled = false;
-        }
 
         // Reflections OFF
         RenderSettings.reflectionIntensity = 0f;
@@ -155,6 +86,6 @@ public class ThermalChanger : MonoBehaviour
         // Thermal camera OFF
         thermalCamera.gameObject.SetActive(false);
 
-        Debug.Log("NORMAL MODE ACTIVATED");
+        Debug.Log("NORMAL MODE");
     }
 }
