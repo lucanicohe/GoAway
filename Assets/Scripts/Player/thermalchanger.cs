@@ -1,34 +1,30 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.Rendering;
 
 public class ThermalChanger : MonoBehaviour
 {
-    [Header("Cameras")]
-    [SerializeField] private Camera mainCamera;
-    [SerializeField] private Camera thermalCamera;
-
-    [Header("Post Processing Volumes")]
-    [SerializeField] private Volume normalVolume;
-    [SerializeField] private Volume thermalVolume;
-
-    [Header("Monster Materials")]
-    [SerializeField] private Renderer monsterRenderer;
+    [Header("Thermal Material")]
     [SerializeField] private Material thermalMaterial;
-    [SerializeField] private Material normalMaterial;
 
-    private bool thermalMode = true;
+    [Header("Random Temperature")]
+    [SerializeField] private float randomTemperatureAmount = 0.6f;
 
-    private float originalFogDensity;
-    private float originalReflectionIntensity;
+    [Header("Monster")]
+    [SerializeField] private GameObject monster;
+    [SerializeField] private float monsterTemperature = 32f;
+
+    private bool thermalMode = false;
+
+    private readonly Dictionary<Renderer, Material[]> originalMaterials = new();
+    private readonly List<Material> thermalInstances = new();
+
+    private static readonly int TempProperty = Shader.PropertyToID("_temp");
 
     private void Start()
     {
-        originalFogDensity = RenderSettings.fogDensity;
-        originalReflectionIntensity = RenderSettings.reflectionIntensity;
-
-        // Start in thermal mode
-        ApplyThermalMode();
+        thermalMode = false;
+        Debug.Log("NORMAL MODE");
     }
 
     private void Update()
@@ -37,55 +33,105 @@ public class ThermalChanger : MonoBehaviour
             (Keyboard.current.digit1Key.wasPressedThisFrame ||
              Keyboard.current.numpad1Key.wasPressedThisFrame))
         {
-            thermalMode = !thermalMode;
-
             if (thermalMode)
-                ApplyThermalMode();
-            else
                 ApplyNormalMode();
+            else
+                ApplyThermalMode();
         }
     }
 
     private void ApplyThermalMode()
     {
-        // Monster material
-        monsterRenderer.sharedMaterial = thermalMaterial;
+        if (thermalMaterial == null)
+        {
+            Debug.LogError("Thermal Material is not assigned!");
+            return;
+        }
 
-        // Post processing
-        thermalVolume.enabled = true;
-        normalVolume.enabled = false;
+        thermalMode = true;
 
-        // Fog ON
-        RenderSettings.fog = true;
-        RenderSettings.fogDensity = originalFogDensity;
+        Renderer[] renderers = FindObjectsByType<Renderer>(
+            FindObjectsInactive.Include,
+            FindObjectsSortMode.None
+        );
 
-        // Full reflections
-        RenderSettings.reflectionIntensity = originalReflectionIntensity;
+        originalMaterials.Clear();
+        thermalInstances.Clear();
 
-        // Thermal camera ON
-        thermalCamera.gameObject.SetActive(true);
+        foreach (Renderer rend in renderers)
+        {
+            if (rend == null)
+                continue;
 
-        Debug.Log("THERMAL MODE");
+            Material[] original = rend.sharedMaterials;
+            originalMaterials[rend] = original;
+
+            bool isMonster = monster != null &&
+                (rend.transform == monster.transform ||
+                 rend.transform.IsChildOf(monster.transform));
+
+            float temperature = isMonster
+                ? monsterTemperature
+                : Random.Range(0f, randomTemperatureAmount);
+
+            Material[] newMaterials = new Material[original.Length];
+
+            for (int i = 0; i < original.Length; i++)
+            {
+                Material instance = new Material(thermalMaterial);
+
+                if (instance.HasProperty(TempProperty))
+                {
+                    instance.SetFloat(TempProperty, temperature);
+                }
+                else
+                {
+                    Debug.LogError(
+                        $"Thermal material is missing '_temp' property. Renderer: {rend.name}"
+                    );
+                }
+
+                newMaterials[i] = instance;
+                thermalInstances.Add(instance);
+            }
+
+            rend.sharedMaterials = newMaterials;
+        }
+
+        Debug.Log($"THERMAL MODE: {originalMaterials.Count} renderers updated.");
     }
 
     private void ApplyNormalMode()
     {
-        // Monster material
-        monsterRenderer.sharedMaterial = normalMaterial;
+        thermalMode = false;
 
-        // Post processing
-        normalVolume.enabled = true;
-        thermalVolume.enabled = false;
+        foreach (var entry in originalMaterials)
+        {
+            if (entry.Key != null)
+            {
+                entry.Key.sharedMaterials = entry.Value;
+            }
+        }
 
-        // Fog OFF
-        RenderSettings.fog = false;
+        foreach (Material instance in thermalInstances)
+        {
+            if (instance != null)
+            {
+                Destroy(instance);
+            }
+        }
 
-        // Reflections OFF
-        RenderSettings.reflectionIntensity = 0f;
+        originalMaterials.Clear();
+        thermalInstances.Clear();
 
-        // Thermal camera OFF
-        thermalCamera.gameObject.SetActive(false);
+        Debug.Log("NORMAL MODE: Original materials restored.");
+    }
 
-        Debug.Log("NORMAL MODE");
+    private void OnDestroy()
+    {
+        if (thermalMode)
+        {
+            ApplyNormalMode();
+        }
     }
 }
