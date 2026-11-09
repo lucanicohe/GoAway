@@ -14,11 +14,20 @@ public class ThermalChanger : MonoBehaviour
     [SerializeField] private GameObject monster;
     [SerializeField] private float monsterTemperature = 32f;
 
+    [Header("Gun")]
+    [SerializeField] private GameObject gun;
+    [SerializeField] private float gunTemperature = 32f;
+
+    [Header("Hand")]
+    [SerializeField] private GameObject hand;
+    [SerializeField] private float handTemperature = 32f;
+
     private bool thermalMode = false;
 
     private readonly Dictionary<Renderer, Material[]> originalMaterials = new();
     private readonly List<Material> thermalInstances = new();
 
+    // Shader Graph Reference property
     private static readonly int TempProperty = Shader.PropertyToID("_temp");
 
     private void Start()
@@ -66,13 +75,16 @@ public class ThermalChanger : MonoBehaviour
             Material[] original = rend.sharedMaterials;
             originalMaterials[rend] = original;
 
-            bool isMonster = monster != null &&
-                (rend.transform == monster.transform ||
-                 rend.transform.IsChildOf(monster.transform));
+            float temperature;
 
-            float temperature = isMonster
-                ? monsterTemperature
-                : Random.Range(0f, randomTemperatureAmount);
+            if (IsInside(rend, monster))
+                temperature = monsterTemperature;
+            else if (IsInside(rend, gun))
+                temperature = gunTemperature;
+            else if (IsInside(rend, hand))
+                temperature = handTemperature;
+            else
+                temperature = Random.Range(0f, randomTemperatureAmount);
 
             Material[] newMaterials = new Material[original.Length];
 
@@ -87,7 +99,7 @@ public class ThermalChanger : MonoBehaviour
                 else
                 {
                     Debug.LogError(
-                        $"Thermal material is missing '_temp' property. Renderer: {rend.name}"
+                        $"Thermal material missing '_temp' property: {rend.name}"
                     );
                 }
 
@@ -101,6 +113,13 @@ public class ThermalChanger : MonoBehaviour
         Debug.Log($"THERMAL MODE: {originalMaterials.Count} renderers updated.");
     }
 
+    private bool IsInside(Renderer rend, GameObject target)
+    {
+        return target != null &&
+               (rend.transform == target.transform ||
+                rend.transform.IsChildOf(target.transform));
+    }
+
     private void ApplyNormalMode()
     {
         thermalMode = false;
@@ -108,17 +127,13 @@ public class ThermalChanger : MonoBehaviour
         foreach (var entry in originalMaterials)
         {
             if (entry.Key != null)
-            {
                 entry.Key.sharedMaterials = entry.Value;
-            }
         }
 
         foreach (Material instance in thermalInstances)
         {
             if (instance != null)
-            {
                 Destroy(instance);
-            }
         }
 
         originalMaterials.Clear();
@@ -130,8 +145,6 @@ public class ThermalChanger : MonoBehaviour
     private void OnDestroy()
     {
         if (thermalMode)
-        {
             ApplyNormalMode();
-        }
     }
 }
