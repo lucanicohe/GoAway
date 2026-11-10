@@ -22,6 +22,26 @@ public class ThermalChanger : MonoBehaviour
     [SerializeField] private GameObject hand;
     [SerializeField] private float handTemperature = 32f;
 
+    [Header("Lamp")]
+    [SerializeField] private GameObject lamp;
+    [SerializeField] private float lampTemperature = 32f;
+
+    [Header("Room")]
+    [SerializeField] private GameObject room;
+    [SerializeField] private float roomTemperature = 32f;
+
+    [Header("Lamp Room2")]
+    [SerializeField] private GameObject lampRoom2;
+    [SerializeField] private float lampRoom2Temperature = 32f;
+
+    [Header("Lamp Hall")]
+    [SerializeField] private GameObject lampHall;
+    [SerializeField] private float lampHallTemperature = 32f;
+
+    [Header("Pipes")]
+    [SerializeField] private GameObject pipes;
+    [SerializeField] private float pipesTemperature = 32f;
+
     private bool thermalMode = false;
 
     private readonly Dictionary<Renderer, Material[]> originalMaterials = new();
@@ -75,16 +95,7 @@ public class ThermalChanger : MonoBehaviour
             Material[] original = rend.sharedMaterials;
             originalMaterials[rend] = original;
 
-            float temperature;
-
-            if (IsInside(rend, monster))
-                temperature = monsterTemperature;
-            else if (IsInside(rend, gun))
-                temperature = gunTemperature;
-            else if (IsInside(rend, hand))
-                temperature = handTemperature;
-            else
-                temperature = Random.Range(0f, randomTemperatureAmount);
+            float temperature = GetTemperature(rend);
 
             Material[] newMaterials = new Material[original.Length];
 
@@ -111,6 +122,35 @@ public class ThermalChanger : MonoBehaviour
         }
 
         Debug.Log($"THERMAL MODE: {originalMaterials.Count} renderers updated.");
+    }
+
+    private float GetTemperature(Renderer rend)
+    {
+        if (IsInside(rend, monster))
+            return monsterTemperature;
+
+        if (IsInside(rend, gun))
+            return gunTemperature;
+
+        if (IsInside(rend, hand))
+            return handTemperature;
+
+        if (IsInside(rend, lamp))
+            return lampTemperature;
+
+        if (IsInside(rend, room))
+            return roomTemperature;
+
+        if (IsInside(rend, lampRoom2))
+            return lampRoom2Temperature;
+
+        if (IsInside(rend, lampHall))
+            return lampHallTemperature;
+
+        if (IsInside(rend, pipes))
+            return pipesTemperature;
+
+        return Random.Range(0f, randomTemperatureAmount);
     }
 
     private bool IsInside(Renderer rend, GameObject target)
