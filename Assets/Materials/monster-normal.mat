@@ -116,7 +116,7 @@ Material:
     - _XRMotionVectorsPass: 1
     - _ZWrite: 0
     - _noise_size: 3
-    - _noise_strength: 0.1
+    - _noise_strength: 0.03
     m_Colors:
     - _BaseColor: {r: 0, g: 0, b: 0, a: 0}
     - _Color: {r: 0, g: 0, b: 0, a: 0}
