@@ -25,10 +25,17 @@ public class MonsterController : MonoBehaviour
 
     [Header("Run settings")]
     [Range(0.5f, 3f)] public float stridesPerSecond = 1.5f;
-    [Tooltip("Also travel forward while running (off = runs on the spot).")]
+    [Tooltip("Enable movement while running (off = runs on the spot).")]
     public bool moveWhileRunning = false;
-    [Tooltip("0 = straight line. Otherwise the monster runs in a circle of this radius (metres).")]
+    [Tooltip("Without a NavMeshAgent, 0 gives straight travel. Positive values set the turn radius in metres.")]
     public float circleRadius = 0f;
+
+    [Header("Agent Settings")]
+    [SerializeField] private LayerMask playerLayer;
+    [SerializeField] private float stopDistance = 2f;
+    [SerializeField] private float detectionDistance = 20f;
+    [SerializeField] private float patrolDistance = 10f;
+    [SerializeField] private float detectionInterval = 2f;
 
     [Header("Attack settings")]
     [Range(0.4f, 3f)] public float riseSeconds = 1.1f;
@@ -70,6 +77,7 @@ public class MonsterController : MonoBehaviour
     bool rigReady;
     float riseT, attackTime, phase, runW, idleTime;
     Vector3 pitchW, yawW;
+    private EnemyMoveSystem movement;
 
     /// <summary>Ground speed (m/s) at which the paws do not slide while galloping.</summary>
     public float RunSpeed { get { return 2.67f * stridesPerSecond; } }
@@ -77,7 +85,22 @@ public class MonsterController : MonoBehaviour
     /// <summary>Direction the monster faces (world space, flattened).</summary>
     public Vector3 Forward { get { return transform.TransformDirection(lF); } }
 
-    void Awake() { DetectRig(); }
+    void Awake()
+    {
+        DetectRig();
+        movement = new EnemyMoveSystem(transform);
+    }
+
+    private void Update()
+    {
+        movement.Tick(rigReady && runOnAllFours && !attackOnTwoLegs && moveWhileRunning, RunSpeed,
+            playerLayer, stopDistance, detectionDistance, patrolDistance, detectionInterval);
+    }
+
+    private void OnDisable()
+    {
+        movement?.Stop();
+    }
 
     static float SStep(float x) { x = Mathf.Clamp01(x); return x * x * (3f - 2f * x); }
 
@@ -288,15 +311,8 @@ public class MonsterController : MonoBehaviour
             if (minY < 0f) bones[iRoot].t.localPosition += lU * (-minY);
         }
 
-        // ---------- optional travel
-        if (moveWhileRunning && runW > 0f)
-        {
-            Vector3 f = Vector3.ProjectOnPlane(Forward, Vector3.up).normalized;
-            float speed = RunSpeed;
-            transform.position += f * (speed * runW * dt);
-            if (circleRadius > 0.1f)
-                transform.Rotate(0f, (speed / circleRadius) * Mathf.Rad2Deg * runW * dt, 0f, Space.World);
-        }
+        if (!movement.HasAgent && moveWhileRunning && runW > 0f)
+            movement.MoveWithoutAgent(Forward, RunSpeed * runW * dt, circleRadius);
     }
 
     // ===================== animation layers =====================
