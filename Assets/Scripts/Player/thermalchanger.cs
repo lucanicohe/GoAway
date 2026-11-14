@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal; // URP Bloom. For HDRP use: using UnityEngine.Rendering.HighDefinition;
+using UnityEngine.Rendering.Universal;
 
 public class ThermalChanger : MonoBehaviour
 {
@@ -23,14 +23,31 @@ public class ThermalChanger : MonoBehaviour
     [Tooltip("Disabled while thermal mode is on, re-enabled in normal mode.")]
     [SerializeField] private GameObject fog;
 
-    [Tooltip("Volume containing the Bloom override.")]
+    [Tooltip("Volume containing the Bloom / Vignette / Lens Flare / Film Grain overrides.")]
     [SerializeField] private Volume volume;
+
+    [Header("Bloom")]
     [SerializeField] private float normalBloomIntensity = 3f;
     [SerializeField] private float thermalBloomIntensity = 33f;
 
-    [Tooltip("Screen Space Lens Flare override on the same Volume.")]
+    [Header("Lens Flare")]
     [SerializeField] private float normalLensFlareIntensity = 0.6f;
     [SerializeField] private float thermalLensFlareIntensity = 0f;
+
+    [Header("Vignette")]
+    [SerializeField] private float normalVignetteIntensity = 0f;
+    [SerializeField] private float thermalVignetteIntensity = 0.4f;
+
+    [Header("Film Grain")]
+    [SerializeField] private float normalFilmGrainIntensity = 0f;
+    [SerializeField] private float thermalFilmGrainIntensity = 1f;
+
+    [Header("Laser Pointer")]
+    [SerializeField] private GameObject laserPointer;
+    [SerializeField] private float laserPointerTemperature = 32f;
+
+    [Header("Red Dot")]
+    [SerializeField] private GameObject redDot;
 
     [Header("Objects with Custom Temperature")]
     [SerializeField] private List<ThermalObject> thermalObjects = new List<ThermalObject>();
@@ -40,12 +57,18 @@ public class ThermalChanger : MonoBehaviour
     private readonly Dictionary<Renderer, Material[]> originalMaterials = new();
     private readonly List<Material> thermalInstances = new();
 
-    // Shader Graph Reference property
     private static readonly int TempProperty = Shader.PropertyToID("_temp");
 
     private void Start()
     {
         thermalMode = false;
+
+        if (laserPointer != null)
+            laserPointer.SetActive(false);
+
+        if (redDot != null)
+            redDot.SetActive(true);
+
         Debug.Log("NORMAL MODE");
     }
 
@@ -114,26 +137,35 @@ public class ThermalChanger : MonoBehaviour
             rend.sharedMaterials = newMaterials;
         }
 
-        // Thermal mode: fog off, bloom up, lens flares off
+        // Thermal mode effects
         if (fog != null)
             fog.SetActive(false);
 
+        if (laserPointer != null)
+            laserPointer.SetActive(true);
+
+        if (redDot != null)
+            redDot.SetActive(false);
+
         SetBloomIntensity(thermalBloomIntensity);
         SetLensFlareIntensity(thermalLensFlareIntensity);
+        SetVignetteIntensity(thermalVignetteIntensity);
+        SetFilmGrainIntensity(thermalFilmGrainIntensity);
 
         Debug.Log($"THERMAL MODE: {originalMaterials.Count} renderers updated.");
     }
 
     private float GetTemperature(Renderer rend)
     {
-        // Check the custom list first
+        if (laserPointer != null && IsInside(rend, laserPointer))
+            return laserPointerTemperature;
+
         foreach (var entry in thermalObjects)
         {
             if (entry.target != null && IsInside(rend, entry.target))
                 return entry.temperature;
         }
 
-        // Fallback for everything else
         return Random.Range(0f, randomTemperatureAmount);
     }
 
@@ -149,7 +181,6 @@ public class ThermalChanger : MonoBehaviour
         if (volume == null)
             return;
 
-        // volume.profile gives this volume its own copy, so the profile asset on disk is never changed.
         if (volume.profile != null && volume.profile.TryGet(out Bloom bloom))
         {
             bloom.intensity.overrideState = true;
@@ -177,6 +208,38 @@ public class ThermalChanger : MonoBehaviour
         }
     }
 
+    private void SetVignetteIntensity(float value)
+    {
+        if (volume == null)
+            return;
+
+        if (volume.profile != null && volume.profile.TryGet(out Vignette vignette))
+        {
+            vignette.intensity.overrideState = true;
+            vignette.intensity.value = value;
+        }
+        else
+        {
+            Debug.LogWarning("ThermalChanger: no Vignette override found on the assigned Volume's profile.");
+        }
+    }
+
+    private void SetFilmGrainIntensity(float value)
+    {
+        if (volume == null)
+            return;
+
+        if (volume.profile != null && volume.profile.TryGet(out FilmGrain filmGrain))
+        {
+            filmGrain.intensity.overrideState = true;
+            filmGrain.intensity.value = value;
+        }
+        else
+        {
+            Debug.LogWarning("ThermalChanger: no Film Grain override found on the assigned Volume's profile.");
+        }
+    }
+
     private void ApplyNormalMode()
     {
         thermalMode = false;
@@ -196,12 +259,20 @@ public class ThermalChanger : MonoBehaviour
         originalMaterials.Clear();
         thermalInstances.Clear();
 
-        // Normal mode: fog back on, bloom back down, lens flares back
+        // Normal mode effects
         if (fog != null)
             fog.SetActive(true);
 
+        if (laserPointer != null)
+            laserPointer.SetActive(false);
+
+        if (redDot != null)
+            redDot.SetActive(true);
+
         SetBloomIntensity(normalBloomIntensity);
         SetLensFlareIntensity(normalLensFlareIntensity);
+        SetVignetteIntensity(normalVignetteIntensity);
+        SetFilmGrainIntensity(normalFilmGrainIntensity);
 
         Debug.Log("NORMAL MODE: Original materials restored.");
     }
