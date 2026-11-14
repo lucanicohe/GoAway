@@ -9866,6 +9866,74 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 5200699434633368333, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
   m_PrefabInstance: {fileID: 679263343}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &1251416335
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1251416337}
+  - component: {fileID: 1251416336}
+  m_Layer: 0
+  m_Name: thermal manager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1251416336
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1251416335}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f4230b3585d1a40aa901c7d466aa73c8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ThermalChanger
+  thermalMaterial: {fileID: 2100000, guid: eb140b94eb528498391a894bdb227d4f, type: 2}
+  randomTemperatureAmount: 0.1
+  fog: {fileID: 1429901935}
+  volume: {fileID: 487983335}
+  normalBloomIntensity: 3
+  thermalBloomIntensity: 9
+  normalLensFlareIntensity: 0.6
+  thermalLensFlareIntensity: 0.1
+  monster: {fileID: 1331752144}
+  monsterTemperature: 64
+  gun: {fileID: 2015480470}
+  gunTemperature: 9
+  hand: {fileID: 1433024129}
+  handTemperature: 32
+  lamp: {fileID: 759854613}
+  lampTemperature: 0
+  room: {fileID: 1245869759}
+  roomTemperature: 0
+  lampRoom2: {fileID: 1380537697}
+  lampRoom2Temperature: 0
+  lampHall: {fileID: 553356893}
+  lampHallTemperature: 3
+  pipes: {fileID: 617870804}
+  pipesTemperature: 32
+--- !u!4 &1251416337
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1251416335}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -41.17891, y: 0.04001, z: -16.12013}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!4 &1269282116 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
@@ -10049,6 +10117,11 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: -288875287208921972, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+--- !u!4 &1289870681 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 7427346024889118441, guid: db9f520ec56144a52836281db85718bd, type: 3}
+  m_PrefabInstance: {fileID: 1274310555}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1331752144 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 6983903108388528947, guid: 0b7e3458581d84fd4af80718b592202b, type: 3}
@@ -25543,7 +25616,7 @@ PrefabInstance:
     - target: {fileID: 5102532369431735331, guid: 85e11111f4d1e49c99c6bb1d1071ffec, type: 3}
       propertyPath: target
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 1289870681}
     - target: {fileID: 5102532369431735331, guid: 85e11111f4d1e49c99c6bb1d1071ffec, type: 3}
       propertyPath: walking
       value: 1
@@ -25611,3 +25684,4 @@ SceneRoots:
   - {fileID: 1599241399}
   - {fileID: 1429901936}
   - {fileID: 1274310555}
+  - {fileID: 1251416337}
