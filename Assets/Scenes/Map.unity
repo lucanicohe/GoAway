@@ -492,7 +492,7 @@ GameObject:
   - component: {fileID: 200633655}
   - component: {fileID: 200633657}
   - component: {fileID: 200633656}
-  m_Layer: 0
+  m_Layer: 28
   m_Name: spot
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -930,6 +930,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: hand_Lowpoly
       objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: d624a265b4e17504db0ac499fe3ca21a, type: 3}
+      propertyPath: m_Layer
+      value: 28
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -1127,7 +1131,7 @@ GameObject:
   - component: {fileID: 519543522}
   - component: {fileID: 519543524}
   - component: {fileID: 519543523}
-  m_Layer: 0
+  m_Layer: 28
   m_Name: inside gun glow
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1218,7 +1222,7 @@ GameObject:
   - component: {fileID: 540416355}
   - component: {fileID: 540416354}
   - component: {fileID: 540416353}
-  m_Layer: 0
+  m_Layer: 28
   m_Name: Plane
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1331,7 +1335,7 @@ GameObject:
   - component: {fileID: 553356897}
   - component: {fileID: 553356896}
   - component: {fileID: 553356895}
-  m_Layer: 0
+  m_Layer: 28
   m_Name: sleeve
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -6659,6 +6663,10 @@ PrefabInstance:
       propertyPath: m_StaticEditorFlags
       value: 2147483647
       objectReference: {fileID: 0}
+    - target: {fileID: -7360794835626033073, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+      propertyPath: m_IsActive
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: -7313538585849759649, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: m_StaticEditorFlags
       value: 2147483647
@@ -7494,6 +7502,10 @@ PrefabInstance:
     - target: {fileID: -667533463606001769, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: m_Layer
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -667533463606001769, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+      propertyPath: m_IsActive
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: -667533463606001769, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: m_StaticEditorFlags
@@ -8967,12 +8979,20 @@ PrefabInstance:
       value: blaster
       objectReference: {fileID: 0}
     - target: {fileID: -8391222552659086748, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
+      propertyPath: m_Layer
+      value: 28
+      objectReference: {fileID: 0}
+    - target: {fileID: -8391222552659086748, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
       propertyPath: m_IsActive
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: -5568371526223589888, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
       propertyPath: m_Name
       value: barrel
+      objectReference: {fileID: 0}
+    - target: {fileID: -5568371526223589888, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
+      propertyPath: m_Layer
+      value: 28
       objectReference: {fileID: 0}
     - target: {fileID: -5568371526223589888, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
       propertyPath: m_IsActive
@@ -9003,12 +9023,20 @@ PrefabInstance:
       value: display
       objectReference: {fileID: 0}
     - target: {fileID: -516098083770646512, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
+      propertyPath: m_Layer
+      value: 28
+      objectReference: {fileID: 0}
+    - target: {fileID: -516098083770646512, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
       propertyPath: m_IsActive
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
       propertyPath: m_Name
       value: gunBlaster
+      objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
+      propertyPath: m_Layer
+      value: 28
       objectReference: {fileID: 0}
     - target: {fileID: 4083501151425157549, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
       propertyPath: m_LocalPosition.x
@@ -9734,7 +9762,7 @@ GameObject:
   - component: {fileID: 1048479858}
   - component: {fileID: 1048479857}
   - component: {fileID: 1048479856}
-  m_Layer: 0
+  m_Layer: 28
   m_Name: laser
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -10295,6 +10323,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: reddot
       objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: b6463e30160e8471f9dd11485ea348dd, type: 3}
+      propertyPath: m_Layer
+      value: 28
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects:
@@ -10346,11 +10378,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ThermalChanger
   thermalMaterial: {fileID: 2100000, guid: eb140b94eb528498391a894bdb227d4f, type: 2}
-  randomTemperatureAmount: 0.1
+  randomTemperatureAmount: 0.3
   fog: {fileID: 1429901935}
   volume: {fileID: 487983335}
   normalBloomIntensity: 6
-  thermalBloomIntensity: 12
+  thermalBloomIntensity: 18
   normalLensFlareIntensity: 0.6
   thermalLensFlareIntensity: 0
   normalVignetteIntensity: 0
@@ -10364,39 +10396,39 @@ MonoBehaviour:
   - target: {fileID: 1433024129}
     temperature: 32
   - target: {fileID: 553356893}
-    temperature: 9
+    temperature: 32
   - target: {fileID: 1331752144}
     temperature: 99
   - target: {fileID: 1139289475}
-    temperature: 64
+    temperature: 18
   - target: {fileID: 1380537697}
-    temperature: 9
+    temperature: 18
   - target: {fileID: 1401624202}
     temperature: 32
   - target: {fileID: 1087770124}
-    temperature: 32
+    temperature: 18
   - target: {fileID: 1263564597}
-    temperature: 32
+    temperature: 18
   - target: {fileID: 1563082828}
-    temperature: 32
+    temperature: 18
   - target: {fileID: 617870804}
     temperature: 32
   - target: {fileID: 111401899}
-    temperature: 32
+    temperature: 18
   - target: {fileID: 380098363}
-    temperature: 32
+    temperature: 18
   - target: {fileID: 1263564597}
-    temperature: 32
+    temperature: 18
   - target: {fileID: 1476977597}
-    temperature: 32
+    temperature: 18
   - target: {fileID: 519543521}
-    temperature: 32
+    temperature: 64
   - target: {fileID: 1245869759}
-    temperature: 9
+    temperature: 18
   - target: {fileID: 2015480470}
-    temperature: 9
+    temperature: 0
   - target: {fileID: 1280603117}
-    temperature: 9
+    temperature: 32
 --- !u!4 &1251416337
 Transform:
   m_ObjectHideFlags: 0
@@ -10564,7 +10596,7 @@ GameObject:
   - component: {fileID: 1280603121}
   - component: {fileID: 1280603120}
   - component: {fileID: 1280603119}
-  m_Layer: 0
+  m_Layer: 28
   m_Name: sleeve (1)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -10580,7 +10612,7 @@ Transform:
   m_GameObject: {fileID: 1280603117}
   serializedVersion: 2
   m_LocalRotation: {x: 0.5059056, y: 0.34538454, z: 0.61274797, w: 0.4993085}
-  m_LocalPosition: {x: -0.156, y: -0.341, z: 0.284}
+  m_LocalPosition: {x: -0.148, y: -0.328, z: 0.282}
   m_LocalScale: {x: -0.21382199, y: -0.28509608, z: -0.28509602}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -26327,7 +26359,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2144388947}
-  m_Layer: 0
+  m_Layer: 28
   m_Name: PlayerObjects
   m_TagString: Untagged
   m_Icon: {fileID: 0}
