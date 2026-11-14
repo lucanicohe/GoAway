@@ -35,7 +35,7 @@ RenderSettings:
   m_DefaultReflectionMode: 1
   m_DefaultReflectionResolution: 128
   m_ReflectionBounces: 1
-  m_ReflectionIntensity: 0.114
+  m_ReflectionIntensity: 0.202
   m_CustomReflection: {fileID: 8900000, guid: 148753378b3f94774ad285ec8b1d6adc, type: 3}
   m_Sun: {fileID: 0}
   m_UseRadianceAmbientProbe: 0
@@ -6902,6 +6902,10 @@ PrefabInstance:
       propertyPath: m_StaticEditorFlags
       value: 2147483647
       objectReference: {fileID: 0}
+    - target: {fileID: -3391060774685152163, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 7678d3640d2e4408eb866eca1a31eb32, type: 2}
     - target: {fileID: -3067674287534584047, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: m_Type
       value: 2
@@ -20371,7 +20375,7 @@ MonoBehaviour:
     m_Bits: 1
   m_VolumeTrigger: {fileID: 0}
   m_VolumeFrameworkUpdateModeOption: 2
-  m_RenderPostProcessing: 0
+  m_RenderPostProcessing: 1
   m_Antialiasing: 0
   m_AntialiasingQuality: 2
   m_StopNaN: 0

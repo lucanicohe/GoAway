@@ -6,10 +6,17 @@ using UnityEngine.Rendering.Universal; // URP Bloom. For HDRP use: using UnityEn
 
 public class ThermalChanger : MonoBehaviour
 {
+    [System.Serializable]
+    public class ThermalObject
+    {
+        public GameObject target;
+        public float temperature = 32f;
+    }
+
     [Header("Thermal Material")]
     [SerializeField] private Material thermalMaterial;
 
-    [Header("Random Temperature")]
+    [Header("Random Temperature (for objects not in the list)")]
     [SerializeField] private float randomTemperatureAmount = 0.6f;
 
     [Header("Thermal Mode Effects")]
@@ -25,37 +32,8 @@ public class ThermalChanger : MonoBehaviour
     [SerializeField] private float normalLensFlareIntensity = 0.6f;
     [SerializeField] private float thermalLensFlareIntensity = 0f;
 
-    [Header("Monster")]
-    [SerializeField] private GameObject monster;
-    [SerializeField] private float monsterTemperature = 32f;
-
-    [Header("Gun")]
-    [SerializeField] private GameObject gun;
-    [SerializeField] private float gunTemperature = 32f;
-
-    [Header("Hand")]
-    [SerializeField] private GameObject hand;
-    [SerializeField] private float handTemperature = 32f;
-
-    [Header("Lamp")]
-    [SerializeField] private GameObject lamp;
-    [SerializeField] private float lampTemperature = 32f;
-
-    [Header("Room")]
-    [SerializeField] private GameObject room;
-    [SerializeField] private float roomTemperature = 32f;
-
-    [Header("Lamp Room2")]
-    [SerializeField] private GameObject lampRoom2;
-    [SerializeField] private float lampRoom2Temperature = 32f;
-
-    [Header("Lamp Hall")]
-    [SerializeField] private GameObject lampHall;
-    [SerializeField] private float lampHallTemperature = 32f;
-
-    [Header("Pipes")]
-    [SerializeField] private GameObject pipes;
-    [SerializeField] private float pipesTemperature = 32f;
+    [Header("Objects with Custom Temperature")]
+    [SerializeField] private List<ThermalObject> thermalObjects = new List<ThermalObject>();
 
     private bool thermalMode = false;
 
@@ -148,30 +126,14 @@ public class ThermalChanger : MonoBehaviour
 
     private float GetTemperature(Renderer rend)
     {
-        if (IsInside(rend, monster))
-            return monsterTemperature;
+        // Check the custom list first
+        foreach (var entry in thermalObjects)
+        {
+            if (entry.target != null && IsInside(rend, entry.target))
+                return entry.temperature;
+        }
 
-        if (IsInside(rend, gun))
-            return gunTemperature;
-
-        if (IsInside(rend, hand))
-            return handTemperature;
-
-        if (IsInside(rend, lamp))
-            return lampTemperature;
-
-        if (IsInside(rend, room))
-            return roomTemperature;
-
-        if (IsInside(rend, lampRoom2))
-            return lampRoom2Temperature;
-
-        if (IsInside(rend, lampHall))
-            return lampHallTemperature;
-
-        if (IsInside(rend, pipes))
-            return pipesTemperature;
-
+        // Fallback for everything else
         return Random.Range(0f, randomTemperatureAmount);
     }
 
