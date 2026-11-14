@@ -300,6 +300,11 @@ CapsuleCollider:
   m_Height: 2.2
   m_Direction: 1
   m_Center: {x: 0, y: 1.02, z: 0}
+--- !u!1 &111401899 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: -815914956966664369, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+  m_PrefabInstance: {fileID: 679263343}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &140137771
 GameObject:
   m_ObjectHideFlags: 0
@@ -930,6 +935,11 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: d624a265b4e17504db0ac499fe3ca21a, type: 3}
+--- !u!1 &380098363 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: -9111870816345138431, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+  m_PrefabInstance: {fileID: 679263343}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &471779605
 GameObject:
   m_ObjectHideFlags: 0
@@ -1157,7 +1167,7 @@ CapsuleCollider:
   m_LayerOverridePriority: 0
   m_IsTrigger: 0
   m_ProvidesContacts: 0
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 2
   m_Radius: 0.5000001
   m_Height: 2
@@ -6577,7 +6587,7 @@ PrefabInstance:
     - target: {fileID: -6397012692486595983, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: 'm_Materials.Array.data[2]'
       value: 
-      objectReference: {fileID: 2100000, guid: 215fcaf35cb36402e8b624d1dfa078bd, type: 2}
+      objectReference: {fileID: 2100000, guid: 784ffbdd43e8f4ab686285523e66c6f3, type: 2}
     - target: {fileID: -6397012692486595983, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: 'm_Materials.Array.data[3]'
       value: 
@@ -7077,7 +7087,7 @@ PrefabInstance:
     - target: {fileID: -2108232153086811143, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: 'm_Materials.Array.data[2]'
       value: 
-      objectReference: {fileID: 2100000, guid: 9c2178fa4d6a24d95815aa8fba419175, type: 2}
+      objectReference: {fileID: 2100000, guid: 784ffbdd43e8f4ab686285523e66c6f3, type: 2}
     - target: {fileID: -2108232153086811143, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: 'm_Materials.Array.data[3]'
       value: 
@@ -8058,6 +8068,10 @@ PrefabInstance:
       propertyPath: m_Shadows.m_Type
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 5726698183313468075, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 784ffbdd43e8f4ab686285523e66c6f3, type: 2}
     - target: {fileID: 5747776294108409827, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: m_Type
       value: 2
@@ -8793,11 +8807,6 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 2130813015}
   m_SourcePrefab: {fileID: 100100000, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
---- !u!1 &759854613 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: -667533463606001769, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
-  m_PrefabInstance: {fileID: 679263343}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &779547796
 GameObject:
   m_ObjectHideFlags: 0
@@ -9475,6 +9484,11 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: -5249165808819407110, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+--- !u!1 &1087770124 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 1341704722722990576, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+  m_PrefabInstance: {fileID: 679263343}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1127684672
 GameObject:
   m_ObjectHideFlags: 0
@@ -9729,6 +9743,11 @@ Light:
   m_LightUnit: 1
   m_LuxAtDistance: 1
   m_EnableSpotReflector: 1
+--- !u!1 &1139289475 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: -4167574341120541390, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+  m_PrefabInstance: {fileID: 679263343}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1145235575
 GameObject:
   m_ObjectHideFlags: 0
@@ -9861,11 +9880,6 @@ Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
   m_PrefabInstance: {fileID: 679263343}
   m_PrefabAsset: {fileID: 0}
---- !u!1 &1245869759 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 5200699434633368333, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
-  m_PrefabInstance: {fileID: 679263343}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1251416335
 GameObject:
   m_ObjectHideFlags: 0
@@ -9903,22 +9917,35 @@ MonoBehaviour:
   thermalBloomIntensity: 9
   normalLensFlareIntensity: 0.6
   thermalLensFlareIntensity: 0.1
-  monster: {fileID: 1331752144}
-  monsterTemperature: 64
-  gun: {fileID: 2015480470}
-  gunTemperature: 9
-  hand: {fileID: 1433024129}
-  handTemperature: 32
-  lamp: {fileID: 759854613}
-  lampTemperature: 0
-  room: {fileID: 1245869759}
-  roomTemperature: 0
-  lampRoom2: {fileID: 1380537697}
-  lampRoom2Temperature: 0
-  lampHall: {fileID: 553356893}
-  lampHallTemperature: 3
-  pipes: {fileID: 617870804}
-  pipesTemperature: 32
+  thermalObjects:
+  - target: {fileID: 1433024129}
+    temperature: 32
+  - target: {fileID: 553356893}
+    temperature: 3
+  - target: {fileID: 1331752144}
+    temperature: 64
+  - target: {fileID: 1139289475}
+    temperature: 64
+  - target: {fileID: 1380537697}
+    temperature: 32
+  - target: {fileID: 1401624202}
+    temperature: 32
+  - target: {fileID: 1087770124}
+    temperature: 32
+  - target: {fileID: 1263564597}
+    temperature: 32
+  - target: {fileID: 1563082828}
+    temperature: 32
+  - target: {fileID: 617870804}
+    temperature: 32
+  - target: {fileID: 111401899}
+    temperature: 32
+  - target: {fileID: 380098363}
+    temperature: 32
+  - target: {fileID: 1263564597}
+    temperature: 32
+  - target: {fileID: 1476977597}
+    temperature: 32
 --- !u!4 &1251416337
 Transform:
   m_ObjectHideFlags: 0
@@ -9934,6 +9961,11 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1263564597 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 1186723863914399784, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+  m_PrefabInstance: {fileID: 679263343}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &1269282116 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
@@ -10133,6 +10165,11 @@ GameObject:
 --- !u!1 &1380537697 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 7463368339331824878, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+  m_PrefabInstance: {fileID: 679263343}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &1401624202 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: -7360794835626033073, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
   m_PrefabInstance: {fileID: 679263343}
   m_PrefabAsset: {fileID: 0}
 --- !u!1 &1410573930
@@ -19845,10 +19882,20 @@ ParticleSystem:
         m_PostInfinity: 2
         m_RotationOrder: 4
     vectorLabel1_3: W
+--- !u!1 &1476977597 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 8636524294663686831, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+  m_PrefabInstance: {fileID: 679263343}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &1559731167 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: d624a265b4e17504db0ac499fe3ca21a, type: 3}
   m_PrefabInstance: {fileID: 341414468}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &1563082828 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 3967855727592751497, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+  m_PrefabInstance: {fileID: 679263343}
   m_PrefabAsset: {fileID: 0}
 --- !u!1001 &1599241399
 PrefabInstance:
@@ -20578,22 +20625,7 @@ MonoBehaviour:
   thermalBloomIntensity: 9
   normalLensFlareIntensity: 0.6
   thermalLensFlareIntensity: 0.1
-  monster: {fileID: 1331752144}
-  monsterTemperature: 64
-  gun: {fileID: 2015480470}
-  gunTemperature: 9
-  hand: {fileID: 1433024129}
-  handTemperature: 32
-  lamp: {fileID: 759854613}
-  lampTemperature: 0
-  room: {fileID: 1245869759}
-  roomTemperature: 0
-  lampRoom2: {fileID: 1380537697}
-  lampRoom2Temperature: 0
-  lampHall: {fileID: 553356893}
-  lampHallTemperature: 3
-  pipes: {fileID: 617870804}
-  pipesTemperature: 32
+  thermalObjects: []
 --- !u!1 &1925559904
 GameObject:
   m_ObjectHideFlags: 0
@@ -25644,11 +25676,6 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 83214736}
   m_SourcePrefab: {fileID: 100100000, guid: 85e11111f4d1e49c99c6bb1d1071ffec, type: 3}
---- !u!1 &2015480470 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: -5568371526223589888, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
-  m_PrefabInstance: {fileID: 758374580}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &2130813014 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
@@ -25671,7 +25698,7 @@ BoxCollider:
   m_LayerOverridePriority: 0
   m_IsTrigger: 0
   m_ProvidesContacts: 0
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 3
   m_Size: {x: 10.31, y: 3.34, z: 2.17}
   m_Center: {x: -3.3, y: 0, z: 0}
