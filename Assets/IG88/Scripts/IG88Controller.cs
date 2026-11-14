@@ -54,7 +54,6 @@ public class IG88Controller : MonoBehaviour
     [SerializeField] private float detectionDistance = 20f;
     [SerializeField] private float patrolDistance = 10f;
     [SerializeField] private float detectionInterval = 2f;
-    [SerializeField] private Transform detectionCenter;
     
     private NavMeshAgent agent;
 
@@ -113,11 +112,15 @@ public class IG88Controller : MonoBehaviour
         bool canMove = walking && moveWhileWalking;
         bool resumeMovement = canMove && agent.isStopped;
         if (!canMove && !agent.isStopped)
-            agent.isStopped = true;
+        {
+             agent.isStopped = true;
+        }
 
         agentTimer -= Time.deltaTime;
         if (agentTimer > 0f && !resumeMovement)
+        {
             return;
+        }
         agentTimer = detectionInterval;
 
         bool wasChasing = !ReferenceEquals(detectedPlayer, null);
@@ -171,8 +174,12 @@ public class IG88Controller : MonoBehaviour
 
     private void TryStartPatrol()
     {
-        var center = detectionCenter != null ? detectionCenter.position : patrolOrigin;
-        var filter = new NavMeshQueryFilter { agentTypeID = agent.agentTypeID, areaMask = agent.areaMask };
+        var center = patrolOrigin;
+        var filter = new NavMeshQueryFilter 
+            { 
+                agentTypeID = agent.agentTypeID,
+                areaMask = agent.areaMask 
+            };
         for (var attempt = 0; attempt < 10; attempt++)
         {
             var offset = UnityEngine.Random.insideUnitCircle * patrolDistance;
@@ -181,7 +188,10 @@ public class IG88Controller : MonoBehaviour
                 && agent.CalculatePath(hit.position, patrolPath)
                 && patrolPath.status == NavMeshPathStatus.PathComplete
                 && agent.SetPath(patrolPath))
-                return;
+            {
+                  return;
+            }
+              
         }
     }
 
@@ -341,11 +351,18 @@ public class IG88Controller : MonoBehaviour
         sh.rotation = Quaternion.Slerp(before, aimed, w);
     }
 
-    void OnDrawGizmosSelected()
+    void OnDrawGizmos()
     {
         if (!drawGizmos || !rigReady || target == null || gunTip == null) return;
         Gizmos.color = aimAtTarget ? Color.red : Color.gray;
         Gizmos.DrawLine(gunTip.t.position, target.position);
+        
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(transform.position, stopDistance);
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, patrolDistance);
+        Gizmos.color = Color.green;
+        Gizmos.DrawWireSphere(transform.position, detectionDistance);
     }
 
     // Handy for your own scripts / UI buttons:
