@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 /// <summary>
 /// IG-88 droid controller. Put this on the droid's root object (the prefab already has it).
@@ -43,7 +45,24 @@ public class IG88Controller : MonoBehaviour
     [Range(0f, 180f)] public float maxArmTurn = 110f;
     [Range(0.02f, 1f)] public float aimSmoothTime = 0.15f;
     public bool drawGizmos = true;
+    
+    [Header("Target")]
+    [SerializeField] private LayerMask playerLayer;
 
+    [Header("AgentSettings")]
+    [SerializeField] private float stopDistance = 2f;
+    [SerializeField] private float detectionDistance = 20f;
+    [SerializeField] private float patrolDistance = 10f;
+    [SerializeField] private float detectionInterval = 2f;
+    [SerializeField] private Transform detectionCenter;
+    
+    private NavMeshAgent agent;
+
+    private Transform detectedPlayer;
+    private Vector3 patrolOrigin;
+    private NavMeshPath patrolPath;
+    private float agentTimer;
+    
     class RigBone
     {
         public Transform t;
@@ -67,7 +86,104 @@ public class IG88Controller : MonoBehaviour
         get { return Vector3.ProjectOnPlane(transform.TransformDirection(restForwardLocal), transform.up).normalized; }
     }
 
-    void Awake() { DetectRig(); }
+    void Awake()
+    {
+        DetectRig();
+        agent = GetComponent<NavMeshAgent>();
+        patrolOrigin = transform.position;
+        patrolPath = new NavMeshPath();
+    }
+    
+    private bool CanNavigate => agent != null && agent.isActiveAndEnabled && agent.isOnNavMesh;
+
+    private void OnDisable()
+    {
+        if (CanNavigate)
+            agent.isStopped = true;
+    }
+
+    private void Update()
+    {
+        if (!CanNavigate)
+        {
+            detectedPlayer = null;
+            return;
+        }
+
+        bool canMove = walking && moveWhileWalking;
+        bool resumeMovement = canMove && agent.isStopped;
+        if (!canMove && !agent.isStopped)
+            agent.isStopped = true;
+
+        agentTimer -= Time.deltaTime;
+        if (agentTimer > 0f && !resumeMovement)
+            return;
+        agentTimer = detectionInterval;
+
+        bool wasChasing = !ReferenceEquals(detectedPlayer, null);
+        detectedPlayer = FindPlayer();
+        if (!canMove)
+        {
+            return;
+        }
+        agent.speed = moveSpeed;
+        agent.isStopped = false;
+        if (detectedPlayer != null)
+        {
+            agent.stoppingDistance = stopDistance;
+            if (!agent.SetDestination(detectedPlayer.position))
+                agent.ResetPath();
+            return;
+        }
+        agent.stoppingDistance = 0.1f;
+        if (wasChasing || resumeMovement)
+        {
+            agent.ResetPath();
+        }
+        if (agent.pathPending || 
+            (agent.hasPath && agent.pathStatus == NavMeshPathStatus.PathComplete
+                           && agent.remainingDistance > agent.stoppingDistance + 0.05f))
+            return;
+
+        TryStartPatrol();
+    }
+    
+    private Transform FindPlayer()
+    {
+        Transform nearestPlayer = null;
+        float nearestDistance = float.PositiveInfinity;
+        Vector3 origin = transform.position;
+        foreach (Collider collider in Physics.OverlapSphere(origin, detectionDistance, playerLayer))
+        {
+            Transform candidate = collider.transform;
+            if (candidate.IsChildOf(transform))
+                continue;
+
+            float distance = (candidate.position - origin).sqrMagnitude;
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearestPlayer = candidate;
+            }
+        }
+        return nearestPlayer;
+    }
+
+    private void TryStartPatrol()
+    {
+        var center = detectionCenter != null ? detectionCenter.position : patrolOrigin;
+        var filter = new NavMeshQueryFilter { agentTypeID = agent.agentTypeID, areaMask = agent.areaMask };
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var offset = UnityEngine.Random.insideUnitCircle * patrolDistance;
+            var candidate = center + new Vector3(offset.x, 0f, offset.y);
+            if (NavMesh.SamplePosition(candidate, out var hit, 2f, filter)
+                && agent.CalculatePath(hit.position, patrolPath)
+                && patrolPath.status == NavMeshPathStatus.PathComplete
+                && agent.SetPath(patrolPath))
+                return;
+        }
+    }
 
     RigBone Grab(Dictionary<string, Transform> map, string key, List<string> missing)
     {
@@ -151,8 +267,6 @@ public class IG88Controller : MonoBehaviour
         {
             phase = Mathf.Repeat(phase + stepsPerSecond * 2f * Mathf.PI * dt, 2f * Mathf.PI);
             ApplyWalk(walkWeight);
-            if (moveWhileWalking)
-                transform.position += RestForward * (moveSpeed * walkWeight * dt);
         }
 
         float aimGoal = (aimAtTarget && target != null) ? 1f : 0f;
