@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -23,7 +24,7 @@ public class ThermalChanger : MonoBehaviour
     [Tooltip("Disabled while thermal mode is on, re-enabled in normal mode.")]
     [SerializeField] private GameObject fog;
 
-    [Tooltip("Volume containing the Bloom / Vignette / Lens Flare / Film Grain overrides.")]
+    [Tooltip("Volume containing the Bloom / Vignette / Lens Flare / Film Grain / Color Adjustments overrides.")]
     [SerializeField] private Volume volume;
 
     [Header("Bloom")]
@@ -42,6 +43,17 @@ public class ThermalChanger : MonoBehaviour
     [SerializeField] private float normalFilmGrainIntensity = 0f;
     [SerializeField] private float thermalFilmGrainIntensity = 1f;
 
+    [Header("Post Exposure")]
+    [SerializeField] private bool flashPostExposureOnThermal = true;
+    [SerializeField] private bool flashPostExposureOnNormal = false;
+    [SerializeField] private float postExposurePeakThermal = 1f;
+    [SerializeField] private float postExposurePeakNormal = 1f;
+    [SerializeField] private float normalPostExposure = 0.3f;
+    [SerializeField] private float thermalPostExposure = 0.6f;
+    [SerializeField] private float postExposureFadeDuration = 0.5f;
+    [Tooltip("X = time (0 → 1), Y = how far it has faded (0 = still at peak, 1 = fully at target)")]
+    [SerializeField] private AnimationCurve postExposureCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
+
     [Header("Laser Pointer")]
     [SerializeField] private GameObject laserPointer;
     [SerializeField] private float laserPointerTemperature = 32f;
@@ -49,10 +61,14 @@ public class ThermalChanger : MonoBehaviour
     [Header("Red Dot")]
     [SerializeField] private GameObject redDot;
 
+    [Header("Visor HUD")]
+    [SerializeField] private VisorHud visorHud;
+
     [Header("Objects with Custom Temperature")]
     [SerializeField] private List<ThermalObject> thermalObjects = new List<ThermalObject>();
 
     private bool thermalMode = false;
+    private Coroutine postExposureRoutine;
 
     private readonly Dictionary<Renderer, Material[]> originalMaterials = new();
     private readonly List<Material> thermalInstances = new();
@@ -68,6 +84,15 @@ public class ThermalChanger : MonoBehaviour
 
         if (redDot != null)
             redDot.SetActive(true);
+
+        if (visorHud != null)
+        {
+            visorHud.showSideArcs = false;
+            visorHud.showCrosshair = true;
+            visorHud.showCompass = true;
+        }
+
+        SetPostExposure(normalPostExposure);
 
         Debug.Log("NORMAL MODE");
     }
@@ -147,10 +172,22 @@ public class ThermalChanger : MonoBehaviour
         if (redDot != null)
             redDot.SetActive(false);
 
+        if (visorHud != null)
+        {
+            visorHud.showSideArcs = true;
+            visorHud.showCrosshair = false;
+            visorHud.showCompass = false;
+        }
+
         SetBloomIntensity(thermalBloomIntensity);
         SetLensFlareIntensity(thermalLensFlareIntensity);
         SetVignetteIntensity(thermalVignetteIntensity);
         SetFilmGrainIntensity(thermalFilmGrainIntensity);
+
+        if (flashPostExposureOnThermal)
+            StartPostExposureTransition(postExposurePeakThermal, thermalPostExposure);
+        else
+            SetPostExposure(thermalPostExposure);
 
         Debug.Log($"THERMAL MODE: {originalMaterials.Count} renderers updated.");
     }
@@ -240,6 +277,55 @@ public class ThermalChanger : MonoBehaviour
         }
     }
 
+    private void SetPostExposure(float value)
+    {
+        if (volume == null)
+            return;
+
+        if (volume.profile != null && volume.profile.TryGet(out ColorAdjustments colorAdj))
+        {
+            colorAdj.postExposure.overrideState = true;
+            colorAdj.postExposure.value = value;
+        }
+        else
+        {
+            Debug.LogWarning("ThermalChanger: no Color Adjustments override found on the assigned Volume's profile.");
+        }
+    }
+
+    private void StartPostExposureTransition(float peak, float targetValue)
+    {
+        if (postExposureRoutine != null)
+            StopCoroutine(postExposureRoutine);
+
+        postExposureRoutine = StartCoroutine(PostExposureFlashAndFade(peak, targetValue));
+    }
+
+    private IEnumerator PostExposureFlashAndFade(float peak, float targetValue)
+    {
+        // Instant peak
+        SetPostExposure(peak);
+
+        float duration = Mathf.Max(0.01f, postExposureFadeDuration);
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+
+            // Use the curve (0 = still at peak, 1 = fully at target)
+            float curveT = postExposureCurve.Evaluate(t);
+            float current = Mathf.Lerp(peak, targetValue, curveT);
+
+            SetPostExposure(current);
+            yield return null;
+        }
+
+        SetPostExposure(targetValue);
+        postExposureRoutine = null;
+    }
+
     private void ApplyNormalMode()
     {
         thermalMode = false;
@@ -269,10 +355,29 @@ public class ThermalChanger : MonoBehaviour
         if (redDot != null)
             redDot.SetActive(true);
 
+        if (visorHud != null)
+        {
+            visorHud.showSideArcs = false;
+            visorHud.showCrosshair = true;
+            visorHud.showCompass = true;
+        }
+
         SetBloomIntensity(normalBloomIntensity);
         SetLensFlareIntensity(normalLensFlareIntensity);
         SetVignetteIntensity(normalVignetteIntensity);
         SetFilmGrainIntensity(normalFilmGrainIntensity);
+
+        if (flashPostExposureOnNormal)
+            StartPostExposureTransition(postExposurePeakNormal, normalPostExposure);
+        else
+        {
+            if (postExposureRoutine != null)
+            {
+                StopCoroutine(postExposureRoutine);
+                postExposureRoutine = null;
+            }
+            SetPostExposure(normalPostExposure);
+        }
 
         Debug.Log("NORMAL MODE: Original materials restored.");
     }
