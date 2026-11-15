@@ -1,73 +1,99 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal; // URP Bloom. For HDRP use: using UnityEngine.Rendering.HighDefinition;
+using UnityEngine.Rendering.Universal;
 
 public class ThermalChanger : MonoBehaviour
 {
+    [System.Serializable]
+    public class ThermalObject
+    {
+        public GameObject target;
+        public float temperature = 32f;
+    }
+
     [Header("Thermal Material")]
     [SerializeField] private Material thermalMaterial;
 
-    [Header("Random Temperature")]
+    [Header("Random Temperature (for objects not in the list)")]
     [SerializeField] private float randomTemperatureAmount = 0.6f;
 
     [Header("Thermal Mode Effects")]
     [Tooltip("Disabled while thermal mode is on, re-enabled in normal mode.")]
     [SerializeField] private GameObject fog;
 
-    [Tooltip("Volume containing the Bloom override.")]
+    [Tooltip("Volume containing the Bloom / Vignette / Lens Flare / Film Grain / Color Adjustments overrides.")]
     [SerializeField] private Volume volume;
+
+    [Header("Bloom")]
     [SerializeField] private float normalBloomIntensity = 3f;
     [SerializeField] private float thermalBloomIntensity = 33f;
 
-    [Tooltip("Screen Space Lens Flare override on the same Volume.")]
+    [Header("Lens Flare")]
     [SerializeField] private float normalLensFlareIntensity = 0.6f;
     [SerializeField] private float thermalLensFlareIntensity = 0f;
 
-    [Header("Monster")]
-    [SerializeField] private GameObject monster;
-    [SerializeField] private float monsterTemperature = 32f;
+    [Header("Vignette")]
+    [SerializeField] private float normalVignetteIntensity = 0f;
+    [SerializeField] private float thermalVignetteIntensity = 0.4f;
 
-    [Header("Gun")]
-    [SerializeField] private GameObject gun;
-    [SerializeField] private float gunTemperature = 32f;
+    [Header("Film Grain")]
+    [SerializeField] private float normalFilmGrainIntensity = 0f;
+    [SerializeField] private float thermalFilmGrainIntensity = 1f;
 
-    [Header("Hand")]
-    [SerializeField] private GameObject hand;
-    [SerializeField] private float handTemperature = 32f;
+    [Header("Post Exposure")]
+    [SerializeField] private bool flashPostExposureOnThermal = true;
+    [SerializeField] private bool flashPostExposureOnNormal = false;
+    [SerializeField] private float postExposurePeakThermal = 1f;
+    [SerializeField] private float postExposurePeakNormal = 1f;
+    [SerializeField] private float normalPostExposure = 0.3f;
+    [SerializeField] private float thermalPostExposure = 0.6f;
+    [SerializeField] private float postExposureFadeDuration = 0.5f;
+    [Tooltip("X = time (0 → 1), Y = how far it has faded (0 = still at peak, 1 = fully at target)")]
+    [SerializeField] private AnimationCurve postExposureCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
 
-    [Header("Lamp")]
-    [SerializeField] private GameObject lamp;
-    [SerializeField] private float lampTemperature = 32f;
+    [Header("Laser Pointer")]
+    [SerializeField] private GameObject laserPointer;
+    [SerializeField] private float laserPointerTemperature = 32f;
 
-    [Header("Room")]
-    [SerializeField] private GameObject room;
-    [SerializeField] private float roomTemperature = 32f;
+    [Header("Red Dot")]
+    [SerializeField] private GameObject redDot;
 
-    [Header("Lamp Room2")]
-    [SerializeField] private GameObject lampRoom2;
-    [SerializeField] private float lampRoom2Temperature = 32f;
+    [Header("Visor HUD")]
+    [SerializeField] private VisorHud visorHud;
 
-    [Header("Lamp Hall")]
-    [SerializeField] private GameObject lampHall;
-    [SerializeField] private float lampHallTemperature = 32f;
-
-    [Header("Pipes")]
-    [SerializeField] private GameObject pipes;
-    [SerializeField] private float pipesTemperature = 32f;
+    [Header("Objects with Custom Temperature")]
+    [SerializeField] private List<ThermalObject> thermalObjects = new List<ThermalObject>();
 
     private bool thermalMode = false;
+    private Coroutine postExposureRoutine;
 
     private readonly Dictionary<Renderer, Material[]> originalMaterials = new();
     private readonly List<Material> thermalInstances = new();
 
-    // Shader Graph Reference property
     private static readonly int TempProperty = Shader.PropertyToID("_temp");
 
     private void Start()
     {
         thermalMode = false;
+
+        if (laserPointer != null)
+            laserPointer.SetActive(false);
+
+        if (redDot != null)
+            redDot.SetActive(true);
+
+        if (visorHud != null)
+        {
+            visorHud.showSideArcs = false;
+            visorHud.showCrosshair = true;
+            visorHud.showCompass = true;
+        }
+
+        SetPostExposure(normalPostExposure);
+
         Debug.Log("NORMAL MODE");
     }
 
@@ -136,41 +162,46 @@ public class ThermalChanger : MonoBehaviour
             rend.sharedMaterials = newMaterials;
         }
 
-        // Thermal mode: fog off, bloom up, lens flares off
+        // Thermal mode effects
         if (fog != null)
             fog.SetActive(false);
 
+        if (laserPointer != null)
+            laserPointer.SetActive(true);
+
+        if (redDot != null)
+            redDot.SetActive(false);
+
+        if (visorHud != null)
+        {
+            visorHud.showSideArcs = true;
+            visorHud.showCrosshair = false;
+            visorHud.showCompass = false;
+        }
+
         SetBloomIntensity(thermalBloomIntensity);
         SetLensFlareIntensity(thermalLensFlareIntensity);
+        SetVignetteIntensity(thermalVignetteIntensity);
+        SetFilmGrainIntensity(thermalFilmGrainIntensity);
+
+        if (flashPostExposureOnThermal)
+            StartPostExposureTransition(postExposurePeakThermal, thermalPostExposure);
+        else
+            SetPostExposure(thermalPostExposure);
 
         Debug.Log($"THERMAL MODE: {originalMaterials.Count} renderers updated.");
     }
 
     private float GetTemperature(Renderer rend)
     {
-        if (IsInside(rend, monster))
-            return monsterTemperature;
+        if (laserPointer != null && IsInside(rend, laserPointer))
+            return laserPointerTemperature;
 
-        if (IsInside(rend, gun))
-            return gunTemperature;
-
-        if (IsInside(rend, hand))
-            return handTemperature;
-
-        if (IsInside(rend, lamp))
-            return lampTemperature;
-
-        if (IsInside(rend, room))
-            return roomTemperature;
-
-        if (IsInside(rend, lampRoom2))
-            return lampRoom2Temperature;
-
-        if (IsInside(rend, lampHall))
-            return lampHallTemperature;
-
-        if (IsInside(rend, pipes))
-            return pipesTemperature;
+        foreach (var entry in thermalObjects)
+        {
+            if (entry.target != null && IsInside(rend, entry.target))
+                return entry.temperature;
+        }
 
         return Random.Range(0f, randomTemperatureAmount);
     }
@@ -187,7 +218,6 @@ public class ThermalChanger : MonoBehaviour
         if (volume == null)
             return;
 
-        // volume.profile gives this volume its own copy, so the profile asset on disk is never changed.
         if (volume.profile != null && volume.profile.TryGet(out Bloom bloom))
         {
             bloom.intensity.overrideState = true;
@@ -215,6 +245,87 @@ public class ThermalChanger : MonoBehaviour
         }
     }
 
+    private void SetVignetteIntensity(float value)
+    {
+        if (volume == null)
+            return;
+
+        if (volume.profile != null && volume.profile.TryGet(out Vignette vignette))
+        {
+            vignette.intensity.overrideState = true;
+            vignette.intensity.value = value;
+        }
+        else
+        {
+            Debug.LogWarning("ThermalChanger: no Vignette override found on the assigned Volume's profile.");
+        }
+    }
+
+    private void SetFilmGrainIntensity(float value)
+    {
+        if (volume == null)
+            return;
+
+        if (volume.profile != null && volume.profile.TryGet(out FilmGrain filmGrain))
+        {
+            filmGrain.intensity.overrideState = true;
+            filmGrain.intensity.value = value;
+        }
+        else
+        {
+            Debug.LogWarning("ThermalChanger: no Film Grain override found on the assigned Volume's profile.");
+        }
+    }
+
+    private void SetPostExposure(float value)
+    {
+        if (volume == null)
+            return;
+
+        if (volume.profile != null && volume.profile.TryGet(out ColorAdjustments colorAdj))
+        {
+            colorAdj.postExposure.overrideState = true;
+            colorAdj.postExposure.value = value;
+        }
+        else
+        {
+            Debug.LogWarning("ThermalChanger: no Color Adjustments override found on the assigned Volume's profile.");
+        }
+    }
+
+    private void StartPostExposureTransition(float peak, float targetValue)
+    {
+        if (postExposureRoutine != null)
+            StopCoroutine(postExposureRoutine);
+
+        postExposureRoutine = StartCoroutine(PostExposureFlashAndFade(peak, targetValue));
+    }
+
+    private IEnumerator PostExposureFlashAndFade(float peak, float targetValue)
+    {
+        // Instant peak
+        SetPostExposure(peak);
+
+        float duration = Mathf.Max(0.01f, postExposureFadeDuration);
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+
+            // Use the curve (0 = still at peak, 1 = fully at target)
+            float curveT = postExposureCurve.Evaluate(t);
+            float current = Mathf.Lerp(peak, targetValue, curveT);
+
+            SetPostExposure(current);
+            yield return null;
+        }
+
+        SetPostExposure(targetValue);
+        postExposureRoutine = null;
+    }
+
     private void ApplyNormalMode()
     {
         thermalMode = false;
@@ -234,12 +345,39 @@ public class ThermalChanger : MonoBehaviour
         originalMaterials.Clear();
         thermalInstances.Clear();
 
-        // Normal mode: fog back on, bloom back down, lens flares back
+        // Normal mode effects
         if (fog != null)
             fog.SetActive(true);
 
+        if (laserPointer != null)
+            laserPointer.SetActive(false);
+
+        if (redDot != null)
+            redDot.SetActive(true);
+
+        if (visorHud != null)
+        {
+            visorHud.showSideArcs = false;
+            visorHud.showCrosshair = true;
+            visorHud.showCompass = true;
+        }
+
         SetBloomIntensity(normalBloomIntensity);
         SetLensFlareIntensity(normalLensFlareIntensity);
+        SetVignetteIntensity(normalVignetteIntensity);
+        SetFilmGrainIntensity(normalFilmGrainIntensity);
+
+        if (flashPostExposureOnNormal)
+            StartPostExposureTransition(postExposurePeakNormal, normalPostExposure);
+        else
+        {
+            if (postExposureRoutine != null)
+            {
+                StopCoroutine(postExposureRoutine);
+                postExposureRoutine = null;
+            }
+            SetPostExposure(normalPostExposure);
+        }
 
         Debug.Log("NORMAL MODE: Original materials restored.");
     }
