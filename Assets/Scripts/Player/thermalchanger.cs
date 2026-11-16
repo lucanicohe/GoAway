@@ -64,6 +64,50 @@ public class ThermalChanger : MonoBehaviour
     [Header("Visor HUD")]
     [SerializeField] private VisorHud visorHud;
 
+    [Header("Blaster: Muzzle Flash")]
+    [Tooltip("Drag in the MuzzleFlash object of the blaster (the one that has BlasterMuzzleFlash on it).")]
+    [SerializeField] private GameObject muzzleFlash;
+    [Tooltip("Temperature of the flash in thermal mode.")]
+    [SerializeField] private float muzzleFlashTemperature = 100f;
+
+    [Header("Blaster: Barrel + Gun Body Heat")]
+    [Tooltip("Drag in the barrel of the gun.")]
+    [SerializeField] private GameObject barrel;
+    [Tooltip("Drag in the main gun body / receiver.")]
+    [SerializeField] private GameObject gunBody;
+
+    [Tooltip("Barrel temperature when it is cold.")]
+    [SerializeField] private float barrelMinTemperature = 1f;
+    [Tooltip("Barrel temperature when it is fully heated.")]
+    [SerializeField] private float barrelMaxTemperature = 180f;
+
+    [Tooltip("Gun body temperature when it is cold.")]
+    [SerializeField] private float gunBodyMinTemperature = 1f;
+    [Tooltip("Gun body temperature when it is fully heated.")]
+    [SerializeField] private float gunBodyMaxTemperature = 55f;
+
+    [Tooltip("How much heat the barrel gets per shot")]
+    [SerializeField] private float barrelHeatPerShot = 6f;
+
+    [Tooltip("How much heat the gun body gets per shot (much lower = heats slower)")]
+    [SerializeField] private float gunBodyHeatPerShot = 1.2f;
+
+    [Tooltip("Seconds needed to cool down from max to min.")]
+    [SerializeField] private float cooldownSeconds = 45f;
+    [Tooltip("Seconds after the last shot before cooling starts.")]
+    [SerializeField] private float cooldownDelay = 0.5f;
+
+    [Tooltip("Live barrel temperature (watch in play mode).")]
+    [SerializeField] private float currentBarrelTemperature = 0f;
+    [Tooltip("Live gun body temperature (watch in play mode).")]
+    [SerializeField] private float currentGunBodyTemperature = 0f;
+
+    [Header("Blaster: Bolts and Sparks")]
+    [Tooltip("Found automatically if empty.")]
+    [SerializeField] private BlasterWeapon blaster;
+    [SerializeField] private float boltTemperature = 100f;
+    [SerializeField] private float sparkTemperature = 80f;
+
     [Header("Objects with Custom Temperature")]
     [SerializeField] private List<ThermalObject> thermalObjects = new List<ThermalObject>();
 
@@ -72,6 +116,13 @@ public class ThermalChanger : MonoBehaviour
 
     private readonly Dictionary<Renderer, Material[]> originalMaterials = new();
     private readonly List<Material> thermalInstances = new();
+
+    // blaster heat
+    private readonly List<Material> barrelInstances = new();
+    private readonly List<Material> gunBodyInstances = new();
+    private BlasterWeapon hookedBlaster;
+    private float lastShotTime = -999f;
+    private float nextFindTime;
 
     private static readonly int TempProperty = Shader.PropertyToID("_temp");
 
@@ -94,6 +145,10 @@ public class ThermalChanger : MonoBehaviour
 
         SetPostExposure(normalPostExposure);
 
+        currentBarrelTemperature = barrelMinTemperature;
+        currentGunBodyTemperature = gunBodyMinTemperature;
+        FindBlaster();
+
         Debug.Log("NORMAL MODE");
     }
 
@@ -107,6 +162,85 @@ public class ThermalChanger : MonoBehaviour
                 ApplyNormalMode();
             else
                 ApplyThermalMode();
+        }
+
+        if (blaster == null && Time.time >= nextFindTime)
+        {
+            nextFindTime = Time.time + 1f;
+            FindBlaster();
+        }
+
+        UpdateBarrelHeat();
+    }
+
+    // ---------------------------------------------------------------- Blaster: barrel + gun body heat
+
+    private void FindBlaster()
+    {
+        if (blaster == null)
+            blaster = FindFirstObjectByType<BlasterWeapon>();
+
+        if (blaster != null && hookedBlaster != blaster)
+        {
+            if (hookedBlaster != null)
+                hookedBlaster.Fired -= OnBlasterShot;
+
+            hookedBlaster = blaster;
+            hookedBlaster.Fired += OnBlasterShot;
+
+            if (thermalMode)
+                hookedBlaster.SetThermalLook(true);
+        }
+    }
+
+    private void OnBlasterShot(BlasterWeapon weapon)
+    {
+        // Barrel heats fast
+        currentBarrelTemperature = Mathf.Min(barrelMaxTemperature,
+            currentBarrelTemperature + barrelHeatPerShot);
+
+        // Gun body heats much slower
+        currentGunBodyTemperature = Mathf.Min(gunBodyMaxTemperature,
+            currentGunBodyTemperature + gunBodyHeatPerShot);
+
+        lastShotTime = Time.time;
+    }
+
+    private void UpdateBarrelHeat()
+    {
+        if (Time.time - lastShotTime > cooldownDelay)
+        {
+            // Barrel cool down
+            if (currentBarrelTemperature > barrelMinTemperature)
+            {
+                float range = Mathf.Max(0.0001f, barrelMaxTemperature - barrelMinTemperature);
+                float perSecond = range / Mathf.Max(0.01f, cooldownSeconds);
+                currentBarrelTemperature = Mathf.Max(barrelMinTemperature, currentBarrelTemperature - perSecond * Time.deltaTime);
+            }
+
+            // Gun Body cool down
+            if (currentGunBodyTemperature > gunBodyMinTemperature)
+            {
+                float range = Mathf.Max(0.0001f, gunBodyMaxTemperature - gunBodyMinTemperature);
+                float perSecond = range / Mathf.Max(0.01f, cooldownSeconds);
+                currentGunBodyTemperature = Mathf.Max(gunBodyMinTemperature, currentGunBodyTemperature - perSecond * Time.deltaTime);
+            }
+        }
+
+        // live update while thermal mode is on
+        if (thermalMode)
+        {
+            foreach (Material instance in barrelInstances)
+            {
+                if (instance != null)
+                    instance.SetFloat(TempProperty, currentBarrelTemperature);
+            }
+
+            foreach (Material instance in gunBodyInstances)
+            {
+                if (instance != null)
+                    instance.SetFloat(TempProperty, currentGunBodyTemperature);
+            }
         }
     }
 
@@ -127,6 +261,8 @@ public class ThermalChanger : MonoBehaviour
 
         originalMaterials.Clear();
         thermalInstances.Clear();
+        barrelInstances.Clear();
+        gunBodyInstances.Clear();
 
         foreach (Renderer rend in renderers)
         {
@@ -157,6 +293,12 @@ public class ThermalChanger : MonoBehaviour
 
                 newMaterials[i] = instance;
                 thermalInstances.Add(instance);
+
+                if (barrel != null && IsInside(rend, barrel))
+                    barrelInstances.Add(instance);
+
+                if (gunBody != null && IsInside(rend, gunBody))
+                    gunBodyInstances.Add(instance);
             }
 
             rend.sharedMaterials = newMaterials;
@@ -179,6 +321,9 @@ public class ThermalChanger : MonoBehaviour
             visorHud.showCompass = false;
         }
 
+        if (blaster != null)
+            blaster.SetThermalLook(true);
+
         SetBloomIntensity(thermalBloomIntensity);
         SetLensFlareIntensity(thermalLensFlareIntensity);
         SetVignetteIntensity(thermalVignetteIntensity);
@@ -196,6 +341,22 @@ public class ThermalChanger : MonoBehaviour
     {
         if (laserPointer != null && IsInside(rend, laserPointer))
             return laserPointerTemperature;
+
+        // blaster parts
+        if (barrel != null && IsInside(rend, barrel))
+            return currentBarrelTemperature;
+
+        if (gunBody != null && IsInside(rend, gunBody))
+            return currentGunBodyTemperature;
+
+        if (muzzleFlash != null && IsInside(rend, muzzleFlash))
+            return muzzleFlashTemperature;
+
+        if (blaster != null && blaster.IsBoltRenderer(rend))
+            return boltTemperature;
+
+        if (blaster != null && blaster.IsSparkRenderer(rend))
+            return sparkTemperature;
 
         foreach (var entry in thermalObjects)
         {
@@ -344,6 +505,8 @@ public class ThermalChanger : MonoBehaviour
 
         originalMaterials.Clear();
         thermalInstances.Clear();
+        barrelInstances.Clear();
+        gunBodyInstances.Clear();
 
         // Normal mode effects
         if (fog != null)
@@ -361,6 +524,9 @@ public class ThermalChanger : MonoBehaviour
             visorHud.showCrosshair = true;
             visorHud.showCompass = true;
         }
+
+        if (blaster != null)
+            blaster.SetThermalLook(false);
 
         SetBloomIntensity(normalBloomIntensity);
         SetLensFlareIntensity(normalLensFlareIntensity);
@@ -384,6 +550,9 @@ public class ThermalChanger : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (hookedBlaster != null)
+            hookedBlaster.Fired -= OnBlasterShot;
+
         if (thermalMode)
             ApplyNormalMode();
     }
