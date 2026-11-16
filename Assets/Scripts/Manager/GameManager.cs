@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using TMPro;
 
 [DefaultExecutionOrder(-50)] // runs before most player scripts
 public class GameManager : MonoBehaviour
@@ -14,6 +15,10 @@ public class GameManager : MonoBehaviour
     [SerializeField] private VisorHud visorHud;
     [SerializeField] private WalkSprintRotationSway sway;
     [SerializeField] private BlasterRecoil recoil;
+
+    [Header("3D Ammo Text")]
+    [Tooltip("Drag your 3D TextMeshPro here")]
+    [SerializeField] private TextMeshPro ammoText3D;
 
     [Header("Sway / Recoil Coordination")]
     [Tooltip("If true, GameManager forces a safe execution order so they don't fight over the same transforms.")]
@@ -76,11 +81,17 @@ public class GameManager : MonoBehaviour
 
     private void UpdateAmmoUI()
     {
+        // Visor HUD (0-1)
         if (visorHud != null)
         {
-            // VisorHud expects 0-1
             float normalized = maxAmmo > 0 ? (float)currentAmmo / maxAmmo : 0f;
             visorHud.SetAmmo(normalized);
+        }
+
+        // 3D TextMeshPro
+        if (ammoText3D != null)
+        {
+            ammoText3D.text = currentAmmo.ToString();
         }
     }
 
@@ -106,18 +117,8 @@ public class GameManager : MonoBehaviour
 
     private void FixSwayRecoilOrder()
     {
-        // WalkSprintRotationSway should run first (lower order)
-        // BlasterRecoil already has [DefaultExecutionOrder(100)] so it runs later.
-        // This just makes sure the sway script also has a low order if it doesn't.
-
         if (sway != null)
         {
-            // Force sway to run early so recoil can overwrite / compose on top of it
-            // (Unity respects DefaultExecutionOrder at runtime)
-            var swayType = typeof(WalkSprintRotationSway);
-            // We can't change the attribute at runtime, but we can log a clear instruction
-            // and the DefaultExecutionOrder(-50) on this GameManager already helps timing.
-
             Debug.Log("[GameManager] Sway/Recoil coordination active. " +
                       "Sway should run before Recoil. If they still fight, " +
                       "put WalkSprintRotationSway on the root (PlayerObjects) and " +
