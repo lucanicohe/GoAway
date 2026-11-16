@@ -29,7 +29,7 @@ public class IG88Controller : MonoBehaviour
     [Range(0f, 0.1f)] public float bodyBob = 0.025f;
     [Range(0f, 15f)] public float torsoTwist = 4f;
     [Tooltip("Also move the droid forward while walking (off = walks in place).")]
-    public bool moveWhileWalking = false;
+    public bool moveWhileWalking = true;
     public float moveSpeed = 0.9f;
 
     [Header("Aim settings")]
@@ -43,16 +43,16 @@ public class IG88Controller : MonoBehaviour
     [Range(0f, 180f)] public float maxArmTurn = 110f;
     [Range(0.02f, 1f)] public float aimSmoothTime = 0.15f;
     public bool drawGizmos = true;
-    
-    [Header("Target")]
-    [SerializeField] private LayerMask playerLayer;
 
-    [Header("AgentSettings")]
-    [SerializeField] private float stopDistance = 2f;
-    [SerializeField] private float detectionDistance = 20f;
-    [SerializeField] private float patrolDistance = 10f;
-    [SerializeField] private float detectionInterval = 2f;
-    
+    [Header("Player")]
+    [Tooltip("Drag your player/camera here. Used for distance check and aiming.")]
+    public Transform player;
+
+    [Header("Agent Settings")]
+    public float stopDistance     = 5f;
+    public float patrolDistance   = 10f;
+    public float detectionInterval = 0.5f;
+
     private EnemyMoveSystem movement;
 
     class RigBone
@@ -60,8 +60,8 @@ public class IG88Controller : MonoBehaviour
         public Transform t;
         public Vector3 restPos;
         public Quaternion restRot;
-        public Vector3 swingAxis; // bone-local axis: positive angle swings the front of a limb up
-        public Vector3 upAxis;    // bone-local up axis (for twisting)
+        public Vector3 swingAxis;
+        public Vector3 upAxis;
     }
 
     readonly List<RigBone> all = new List<RigBone>();
@@ -72,7 +72,6 @@ public class IG88Controller : MonoBehaviour
     bool rigReady;
     float phase, walkWeight, aimWeight, yaw, yawVel;
 
-    /// <summary>Direction the droid faces (world space, flattened).</summary>
     public Vector3 RestForward
     {
         get { return Vector3.ProjectOnPlane(transform.TransformDirection(restForwardLocal), transform.up).normalized; }
@@ -86,8 +85,14 @@ public class IG88Controller : MonoBehaviour
 
     private void Update()
     {
-        movement.Tick(walking && moveWhileWalking, moveSpeed, playerLayer, stopDistance,
-            detectionDistance, patrolDistance, detectionInterval);
+        // Use player as the aim target too
+        if (player != null) target = player;
+
+        movement.Tick(player, moveSpeed, stopDistance, patrolDistance, detectionInterval);
+
+        bool playerClose = movement.IsPlayerInRange;
+        aimAtTarget = playerClose;
+        walking     = !playerClose;
     }
 
     private void OnDisable()
@@ -105,7 +110,6 @@ public class IG88Controller : MonoBehaviour
         return b;
     }
 
-    /// <summary>Finds the bones and records the rest pose. Safe to call more than once.</summary>
     public bool DetectRig()
     {
         if (rigReady) return true;
@@ -136,7 +140,6 @@ public class IG88Controller : MonoBehaviour
         f.Normalize();
         restForwardLocal = transform.InverseTransformDirection(f);
 
-        // Hinge axis for walking: choose the sign so a positive angle lifts the front of a limb.
         Vector3 lateral = Vector3.Cross(up, f).normalized;
         Vector3 test = Quaternion.AngleAxis(10f, lateral) * f;
         if (Vector3.Dot(test, up) < 0f) lateral = -lateral;
@@ -187,11 +190,11 @@ public class IG88Controller : MonoBehaviour
 
     void Leg(RigBone thigh, RigBone shin, RigBone foot, float s, float c, float w)
     {
-        float t = thighSwing * s * w;                 // + = leg swings forward
-        float knee = kneeBend * Mathf.Max(0f, c) * w; // knee bends while the leg moves forward
+        float t = thighSwing * s * w;
+        float knee = kneeBend * Mathf.Max(0f, c) * w;
         Swing(thigh, t);
         Swing(shin, -knee);
-        Swing(foot, (knee - t) * 0.8f);               // keep the foot roughly level
+        Swing(foot, (knee - t) * 0.8f);
     }
 
     void ApplyWalk(float w)
@@ -201,7 +204,7 @@ public class IG88Controller : MonoBehaviour
         Leg(thighL, shinL, footL, sL, cL, w);
         Leg(thighR, shinR, footR, sR, cR, w);
         Swing(armL, -armSwing * sL * w);
-        Swing(armR, armSwing * 0.25f * sL * w);       // gun arm only sways a little
+        Swing(armR, armSwing * 0.25f * sL * w);
         Twist(waist, torsoTwist * sL * w);
         float bob = bodyBob * Mathf.Cos(2f * phase) * w;
         Transform p = pelvis.t.parent;
@@ -215,7 +218,6 @@ public class IG88Controller : MonoBehaviour
         Vector3 fwd = Vector3.ProjectOnPlane(transform.TransformDirection(restForwardLocal), up);
         Vector3 tp = target.position;
 
-        // 1) upper body turns (waist + chest) around the vertical axis
         Vector3 flat = Vector3.ProjectOnPlane(tp - chest.t.position, up);
         float desired = 0f;
         if (flat.sqrMagnitude > 0.0004f)
@@ -225,7 +227,6 @@ public class IG88Controller : MonoBehaviour
         waist.t.rotation = Quaternion.AngleAxis(a * waistShare, up) * waist.t.rotation;
         chest.t.rotation = Quaternion.AngleAxis(a * (1f - waistShare), up) * chest.t.rotation;
 
-        // 2) head looks at the target
         Vector3 hf = head.t.TransformDirection(headFwdLocal);
         Vector3 hd = tp - head.t.position;
         if (hd.sqrMagnitude > 1e-4f)
@@ -235,7 +236,6 @@ public class IG88Controller : MonoBehaviour
             head.t.rotation = Quaternion.Slerp(Quaternion.identity, full, headFollow * w) * head.t.rotation;
         }
 
-        // 3) gun arm: rotate the whole arm at the shoulder until the barrel points at the target
         Transform sh = armR.t;
         Quaternion before = sh.rotation;
         for (int i = 0; i < 4; i++)
@@ -256,16 +256,12 @@ public class IG88Controller : MonoBehaviour
         if (!drawGizmos || !rigReady || target == null || gunTip == null) return;
         Gizmos.color = aimAtTarget ? Color.red : Color.gray;
         Gizmos.DrawLine(gunTip.t.position, target.position);
-        
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position, stopDistance);
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, patrolDistance);
-        Gizmos.color = Color.green;
-        Gizmos.DrawWireSphere(transform.position, detectionDistance);
     }
 
-    // Handy for your own scripts / UI buttons:
     public void SetWalking(bool value) { walking = value; }
     public void SetAiming(bool value) { aimAtTarget = value; }
 }

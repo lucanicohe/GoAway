@@ -24,6 +24,17 @@ public class GameManager : MonoBehaviour
     [Tooltip("If true, GameManager forces a safe execution order so they don't fight over the same transforms.")]
     [SerializeField] private bool autoFixSwayRecoilConflict = true;
 
+    [Header("IG-88 Patrol")]
+    [Tooltip("Drag all 4 IG-88 root GameObjects here.")]
+    [SerializeField] private IG88Controller[] ig88s;
+    [Tooltip("Drag the player (or camera) here — IG-88s will measure distance and aim at this.")]
+    [SerializeField] private Transform playerTarget;
+    [SerializeField] private float ig88PatrolSpeed      = 2.5f;
+    [SerializeField] private float ig88StopDistance     = 5f;
+    [SerializeField] private float ig88PatrolDistance   = 15f;
+    [SerializeField] private float ig88DetectionInterval = 0.5f;
+    [SerializeField] private float ig88StepsPerSecond   = 1.8f;
+
     private bool blasterWasEnabled;
 
     private void Awake()
@@ -59,6 +70,19 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
+        if (ig88s != null)
+        {
+            foreach (var ig in ig88s)
+            {
+                if (ig == null) continue;
+                ig.player            = playerTarget;
+                ig.moveSpeed         = ig88PatrolSpeed;
+                ig.stopDistance      = ig88StopDistance;
+                ig.patrolDistance    = ig88PatrolDistance;
+                ig.detectionInterval = ig88DetectionInterval;
+                ig.stepsPerSecond    = ig88StepsPerSecond;
+            }
+        }
         // Optional: also block firing when out of ammo by disabling the component temporarily
         if (blaster != null)
         {

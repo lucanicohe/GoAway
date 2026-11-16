@@ -6599,11 +6599,6 @@ NavMeshAgent:
   m_BaseOffset: 0
   m_WalkableMask: 4294967295
   m_ObstacleAvoidanceType: 4
---- !u!1 &617870804 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 3286872407655050047, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
-  m_PrefabInstance: {fileID: 679263343}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &660152206
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -7467,6 +7462,10 @@ PrefabInstance:
       propertyPath: 'm_Materials.Array.data[5]'
       value: 
       objectReference: {fileID: 2100000, guid: 4f246ed0525124ae9b207292c68495c7, type: 2}
+    - target: {fileID: -6288754875703805147, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+      propertyPath: m_IsActive
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: -6288754875703805147, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       propertyPath: m_StaticEditorFlags
       value: 2147483647
@@ -9678,11 +9677,6 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 2130813015}
   m_SourcePrefab: {fileID: 100100000, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
---- !u!1 &759854613 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: -667533463606001769, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
-  m_PrefabInstance: {fileID: 679263343}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &779547796
 GameObject:
   m_ObjectHideFlags: 0
@@ -10923,11 +10917,6 @@ MonoBehaviour:
   m_Center: {x: -50.43877, y: 5.622385, z: -21.682373}
   m_Area: 0
   m_AffectedAgents: a98c17ec
---- !u!1 &1245869759 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 5200699434633368333, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
-  m_PrefabInstance: {fileID: 679263343}
-  m_PrefabAsset: {fileID: 0}
 --- !u!4 &1269282116 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
@@ -11104,16 +11093,6 @@ MeshCollider:
   m_Convex: 0
   m_CookingOptions: 30
   m_Mesh: {fileID: -288875287208921972, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
---- !u!1 &1331752144 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 6983903108388528947, guid: 0b7e3458581d84fd4af80718b592202b, type: 3}
-  m_PrefabInstance: {fileID: 1599241399}
-  m_PrefabAsset: {fileID: 0}
---- !u!1 &1380537697 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 7463368339331824878, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
-  m_PrefabInstance: {fileID: 679263343}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1410573930
 GameObject:
   m_ObjectHideFlags: 0
@@ -15983,11 +15962,6 @@ Transform:
   - {fileID: 722220803}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1433024129 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: d624a265b4e17504db0ac499fe3ca21a, type: 3}
-  m_PrefabInstance: {fileID: 341414468}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1437736295
 GameObject:
   m_ObjectHideFlags: 0
@@ -21371,14 +21345,6 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 2100000, guid: f53a6ade83d724803ac6fcdbfd36489b, type: 2}
     - target: {fileID: 4399821217083795073, guid: 0b7e3458581d84fd4af80718b592202b, type: 3}
-      propertyPath: moveWhileRunning
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 4399821217083795073, guid: 0b7e3458581d84fd4af80718b592202b, type: 3}
-      propertyPath: playerLayer.m_Bits
-      value: 2147483648
-      objectReference: {fileID: 0}
-    - target: {fileID: 4399821217083795073, guid: 0b7e3458581d84fd4af80718b592202b, type: 3}
       propertyPath: riseSeconds
       value: 0.4
       objectReference: {fileID: 0}
@@ -21387,8 +21353,16 @@ PrefabInstance:
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4399821217083795073, guid: 0b7e3458581d84fd4af80718b592202b, type: 3}
+      propertyPath: moveWhileRunning
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4399821217083795073, guid: 0b7e3458581d84fd4af80718b592202b, type: 3}
       propertyPath: stridesPerSecond
       value: 1.72
+      objectReference: {fileID: 0}
+    - target: {fileID: 4399821217083795073, guid: 0b7e3458581d84fd4af80718b592202b, type: 3}
+      propertyPath: playerLayer.m_Bits
+      value: 2147483648
       objectReference: {fileID: 0}
     - target: {fileID: 4976244247473471881, guid: 0b7e3458581d84fd4af80718b592202b, type: 3}
       propertyPath: m_Name
@@ -22092,22 +22066,63 @@ MonoBehaviour:
   thermalBloomIntensity: 9
   normalLensFlareIntensity: 0.6
   thermalLensFlareIntensity: 0.1
-  monster: {fileID: 1331752144}
-  monsterTemperature: 64
-  gun: {fileID: 2015480470}
-  gunTemperature: 9
-  hand: {fileID: 1433024129}
-  handTemperature: 32
-  lamp: {fileID: 759854613}
-  lampTemperature: 0
-  room: {fileID: 1245869759}
-  roomTemperature: 0
-  lampRoom2: {fileID: 1380537697}
-  lampRoom2Temperature: 0
-  lampHall: {fileID: 553356893}
-  lampHallTemperature: 3
-  pipes: {fileID: 617870804}
-  pipesTemperature: 32
+  normalVignetteIntensity: 0
+  thermalVignetteIntensity: 0.4
+  normalFilmGrainIntensity: 0
+  thermalFilmGrainIntensity: 1
+  flashPostExposureOnThermal: 1
+  flashPostExposureOnNormal: 0
+  postExposurePeakThermal: 1
+  postExposurePeakNormal: 1
+  normalPostExposure: 0.3
+  thermalPostExposure: 0.6
+  postExposureFadeDuration: 0.5
+  postExposureCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  laserPointer: {fileID: 0}
+  laserPointerTemperature: 32
+  redDot: {fileID: 0}
+  visorHud: {fileID: 0}
+  muzzleFlash: {fileID: 0}
+  muzzleFlashTemperature: 100
+  barrel: {fileID: 0}
+  gunBody: {fileID: 0}
+  barrelMinTemperature: 1
+  barrelMaxTemperature: 180
+  gunBodyMinTemperature: 1
+  gunBodyMaxTemperature: 55
+  barrelHeatPerShot: 6
+  gunBodyHeatPerShot: 1.2
+  cooldownSeconds: 45
+  cooldownDelay: 0.5
+  currentBarrelTemperature: 0
+  currentGunBodyTemperature: 0
+  blaster: {fileID: 0}
+  boltTemperature: 100
+  sparkTemperature: 80
+  thermalObjects: []
 --- !u!1 &1850219381
 GameObject:
   m_ObjectHideFlags: 0
@@ -27487,11 +27502,6 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 83214740}
   m_SourcePrefab: {fileID: 100100000, guid: 85e11111f4d1e49c99c6bb1d1071ffec, type: 3}
---- !u!1 &2015480470 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: -5568371526223589888, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}
-  m_PrefabInstance: {fileID: 758374580}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &2130813014 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 1a55be4bb9de45947bc3984c34e35128, type: 3}

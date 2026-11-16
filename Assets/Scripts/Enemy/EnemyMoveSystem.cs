@@ -7,8 +7,9 @@ internal sealed class EnemyMoveSystem
     private readonly NavMeshAgent agent;
     private readonly Vector3 patrolOrigin;
     private readonly NavMeshPath patrolPath;
-    private Transform detectedPlayer;
     private float detectionTimer;
+
+    public bool IsPlayerInRange { get; private set; }
 
     public EnemyMoveSystem(Transform owner)
     {
@@ -28,46 +29,38 @@ internal sealed class EnemyMoveSystem
             agent.isStopped = true;
     }
 
-    public void Tick(bool canMove, float speed, LayerMask playerLayer, float stopDistance,
-        float detectionDistance, float patrolDistance, float detectionInterval)
+    // player: dragged-in player transform (can be null)
+    public void Tick(Transform player, float speed, float stopDistance,
+        float patrolDistance, float detectionInterval)
     {
-        if (!CanNavigate)
+        IsPlayerInRange = false;
+
+        if (!CanNavigate) { detectionTimer = 0f; return; }
+
+        agent.speed = speed;
+
+        if (player != null)
         {
-            detectedPlayer = null;
-            detectionTimer = 0f;
-            return;
+            float dist = Vector3.Distance(owner.position, player.position);
+            if (dist <= stopDistance)
+            {
+                // Stop and face player
+                IsPlayerInRange = true;
+                agent.isStopped = true;
+                Vector3 dir = Vector3.ProjectOnPlane(player.position - owner.position, Vector3.up);
+                if (dir.sqrMagnitude > 0.01f)
+                    owner.rotation = Quaternion.LookRotation(dir);
+                return;
+            }
         }
 
-        if (!canMove)
-        {
-            Stop();
-            return;
-        }
-
-        bool resumeMovement = agent.isStopped;
+        // Resume patrol
         agent.isStopped = false;
-        if (agent.isOnOffMeshLink)
-            return;
+        if (agent.isOnOffMeshLink) return;
 
         detectionTimer -= Time.deltaTime;
-        if (detectionTimer > 0f && !resumeMovement)
-            return;
+        if (detectionTimer > 0f) return;
         detectionTimer = detectionInterval;
-
-        bool wasChasing = !ReferenceEquals(detectedPlayer, null);
-        detectedPlayer = FindPlayer(detectionDistance, playerLayer);
-        agent.speed = speed;
-        if (detectedPlayer != null)
-        {
-            agent.stoppingDistance = stopDistance;
-            if (!agent.SetDestination(detectedPlayer.position))
-                agent.ResetPath();
-            return;
-        }
-
-        agent.stoppingDistance = 0.1f;
-        if (wasChasing || resumeMovement)
-            agent.ResetPath();
 
         if (agent.pathPending ||
             (agent.hasPath && agent.pathStatus == NavMeshPathStatus.PathComplete &&
@@ -77,33 +70,13 @@ internal sealed class EnemyMoveSystem
         TryStartPatrol(patrolDistance);
     }
 
-    private Transform FindPlayer(float detectionDistance, LayerMask playerLayer)
-    {
-        Transform nearestPlayer = null;
-        float nearestDistance = float.PositiveInfinity;
-        Vector3 origin = owner.position;
-        foreach (Collider collider in Physics.OverlapSphere(origin, detectionDistance, playerLayer))
-        {
-            Transform candidate = collider.transform;
-            if (candidate.IsChildOf(owner))
-                continue;
-
-            float distance = (candidate.position - origin).sqrMagnitude;
-            if (distance < nearestDistance)
-            {
-                nearestDistance = distance;
-                nearestPlayer = candidate;
-            }
-        }
-        return nearestPlayer;
-    }
-
     private void TryStartPatrol(float patrolDistance)
     {
         var filter = new NavMeshQueryFilter { agentTypeID = agent.agentTypeID, areaMask = agent.areaMask };
         for (int attempt = 0; attempt < 10; attempt++)
         {
             Vector3 offset = Random.insideUnitSphere * patrolDistance;
+            offset.y = 0f;
             Vector3 candidate = patrolOrigin + offset;
             if (NavMesh.SamplePosition(candidate, out var hit, 2f, filter)
                 && agent.CalculatePath(hit.position, patrolPath)
@@ -111,6 +84,59 @@ internal sealed class EnemyMoveSystem
                 && agent.SetPath(patrolPath))
                 return;
         }
+    }
+
+    // Legacy overload used by MonsterController (layer-based detection)
+    public void Tick(bool canMove, float speed, LayerMask playerLayer, float stopDistance,
+        float detectionDistance, float patrolDistance, float detectionInterval)
+    {
+        if (!CanNavigate) { IsPlayerInRange = false; detectionTimer = 0f; return; }
+        if (!canMove) { IsPlayerInRange = false; Stop(); return; }
+
+        agent.isStopped = false;
+        if (agent.isOnOffMeshLink) return;
+
+        detectionTimer -= Time.deltaTime;
+        if (detectionTimer > 0f) return;
+        detectionTimer = detectionInterval;
+
+        Transform nearest = FindNearest(detectionDistance, playerLayer);
+        agent.speed = speed;
+
+        if (nearest != null)
+        {
+            float dist = Vector3.Distance(owner.position, nearest.position);
+            IsPlayerInRange = dist <= stopDistance;
+            agent.stoppingDistance = stopDistance;
+            if (IsPlayerInRange)
+            {
+                agent.isStopped = true;
+                Vector3 dir = Vector3.ProjectOnPlane(nearest.position - owner.position, Vector3.up);
+                if (dir.sqrMagnitude > 0.01f) owner.rotation = Quaternion.LookRotation(dir);
+            }
+            else
+            {
+                if (!agent.SetDestination(nearest.position)) agent.ResetPath();
+            }
+            return;
+        }
+
+        IsPlayerInRange = false;
+        agent.stoppingDistance = 0.1f;
+        TryStartPatrol(patrolDistance);
+    }
+
+    private Transform FindNearest(float detectionDistance, LayerMask playerLayer)
+    {
+        Transform nearest = null;
+        float nearestDist = float.PositiveInfinity;
+        foreach (Collider col in Physics.OverlapSphere(owner.position, detectionDistance, playerLayer))
+        {
+            if (col.transform.IsChildOf(owner)) continue;
+            float d = (col.transform.position - owner.position).sqrMagnitude;
+            if (d < nearestDist) { nearestDist = d; nearest = col.transform; }
+        }
+        return nearest;
     }
 
     public void MoveWithoutAgent(Vector3 forward, float distance, float circleRadius)
