@@ -2,35 +2,31 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// IG-88 droid controller. Put this on the droid's root object (the prefab already has it).
-/// - "Walking" checkbox      : plays a procedural walk cycle (legs, arms, hips, torso).
-/// - "Aim At Target" checkbox: waist/chest/head turn toward "Target" and the gun arm points the gun at it.
-/// Works with the bones that come inside IG88.fbx. No Animator or animation clip is needed.
+/// IG-88 droid animation. Put this on the droid's root object (the prefab already has it).
+/// Procedural walk cycle + waist/chest/head/gun-arm aiming. No Animator or animation clip is needed.
+///
+/// Movement, detection and patrolling live in IG88Patrol (same GameObject). This script only reads it:
+///   patrol.IsMoving     -> walk cycle (legs speed follows the real movement speed, so feet don't slide)
+///   patrol.CanSeePlayer -> aim at the player
 /// </summary>
 [DisallowMultipleComponent]
+[RequireComponent(typeof(IG88Patrol))]
 [AddComponentMenu("IG88/IG88 Controller")]
 public class IG88Controller : MonoBehaviour
 {
-    [Header("TICK THESE")]
-    [Tooltip("Tick to play the walking animation.")]
+    [Header("Live state (driven automatically by IG88Patrol)")]
     public bool walking = false;
-
-    [Tooltip("Tick to make the upper body, head and gun arm aim at the Target. Untick to return to the rest pose.")]
-    public bool aimAtTarget = true;
-
-    [Tooltip("The object the droid aims at. Move this object around (in the Scene view) and the droid follows it.")]
+    public bool aimAtTarget = false;
     public Transform target;
 
     [Header("Walk settings")]
-    [Range(0.2f, 3f)] public float stepsPerSecond = 1.1f;
+    [Tooltip("Metres the droid travels per full walk cycle (left + right step). Raise it if the feet look like they slide forward, lower it if they look like they run on the spot.")]
+    [Range(0.5f, 4f)] public float strideLength = 1.4f;
     [Range(0f, 50f)] public float thighSwing = 26f;
     [Range(0f, 80f)] public float kneeBend = 38f;
     [Range(0f, 40f)] public float armSwing = 14f;
     [Range(0f, 0.1f)] public float bodyBob = 0.025f;
     [Range(0f, 15f)] public float torsoTwist = 4f;
-    [Tooltip("Also move the droid forward while walking (off = walks in place).")]
-    public bool moveWhileWalking = true;
-    public float moveSpeed = 0.9f;
 
     [Header("Aim settings")]
     [Tooltip("Max degrees the waist+chest may turn away from the front.")]
@@ -44,16 +40,7 @@ public class IG88Controller : MonoBehaviour
     [Range(0.02f, 1f)] public float aimSmoothTime = 0.15f;
     public bool drawGizmos = true;
 
-    [Header("Player")]
-    [Tooltip("Drag your player/camera here. Used for distance check and aiming.")]
-    public Transform player;
-
-    [Header("Agent Settings")]
-    public float stopDistance     = 5f;
-    public float patrolDistance   = 10f;
-    public float detectionInterval = 0.5f;
-
-    private EnemyMoveSystem movement;
+    IG88Patrol patrol;
 
     class RigBone
     {
@@ -72,32 +59,34 @@ public class IG88Controller : MonoBehaviour
     bool rigReady;
     float phase, walkWeight, aimWeight, yaw, yawVel;
 
+    /// <summary>The direction the droid's gun points at rest, flattened. This is the droid's "front".</summary>
     public Vector3 RestForward
     {
         get { return Vector3.ProjectOnPlane(transform.TransformDirection(restForwardLocal), transform.up).normalized; }
     }
 
+    /// <summary>Where the droid's eyes are (used for line-of-sight checks).</summary>
+    public Vector3 EyePosition
+    {
+        get { return (rigReady && head != null) ? head.t.position : transform.position + transform.up * 1.6f; }
+    }
+
+    /// <summary>Tell this droid who to look for (GameManager calls this).</summary>
+    public void SetPlayer(Transform player)
+    {
+        if (patrol != null) patrol.player = player;
+    }
+
     void Awake()
     {
+        patrol = GetComponent<IG88Patrol>();
+        if (patrol == null)
+        {
+            // Older prefab instances don't have it yet - add it so everything still works.
+            Debug.Log("IG88Controller: no IG88Patrol on '" + name + "', adding one with default settings. Add it to the prefab to tweak the route.", this);
+            patrol = gameObject.AddComponent<IG88Patrol>();
+        }
         DetectRig();
-        movement = new EnemyMoveSystem(transform);
-    }
-
-    private void Update()
-    {
-        // Use player as the aim target too
-        if (player != null) target = player;
-
-        movement.Tick(player, moveSpeed, stopDistance, patrolDistance, detectionInterval);
-
-        bool playerClose = movement.IsPlayerInRange;
-        aimAtTarget = playerClose;
-        walking     = !playerClose;
-    }
-
-    private void OnDisable()
-    {
-        movement?.Stop();
     }
 
     RigBone Grab(Dictionary<string, Transform> map, string key, List<string> missing)
@@ -168,17 +157,28 @@ public class IG88Controller : MonoBehaviour
         }
     }
 
+    void SyncFromPatrol()
+    {
+        if (patrol == null) return;
+        target = patrol.Player;
+        walking = patrol.IsMoving;
+        aimAtTarget = patrol.CanSeePlayer;
+    }
+
     void LateUpdate()
     {
         if (!rigReady && !DetectRig()) return;
         float dt = Time.deltaTime;
 
+        SyncFromPatrol();
         ResetPose();
 
         walkWeight = Mathf.MoveTowards(walkWeight, walking ? 1f : 0f, dt / 0.3f);
         if (walkWeight > 0f)
         {
-            phase = Mathf.Repeat(phase + stepsPerSecond * 2f * Mathf.PI * dt, 2f * Mathf.PI);
+            // Leg cycle follows the real ground speed, so the feet match the movement.
+            float cyclesPerSecond = (patrol != null ? patrol.CurrentSpeed : 0f) / strideLength;
+            phase = Mathf.Repeat(phase + cyclesPerSecond * 2f * Mathf.PI * dt, 2f * Mathf.PI);
             ApplyWalk(walkWeight);
         }
 
@@ -256,12 +256,6 @@ public class IG88Controller : MonoBehaviour
         if (!drawGizmos || !rigReady || target == null || gunTip == null) return;
         Gizmos.color = aimAtTarget ? Color.red : Color.gray;
         Gizmos.DrawLine(gunTip.t.position, target.position);
-        Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(transform.position, stopDistance);
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, patrolDistance);
+        // detection range / stop distance / route gizmos are drawn by IG88Patrol (select the droid to see them)
     }
-
-    public void SetWalking(bool value) { walking = value; }
-    public void SetAiming(bool value) { aimAtTarget = value; }
 }

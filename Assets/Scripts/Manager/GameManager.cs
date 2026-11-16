@@ -25,15 +25,10 @@ public class GameManager : MonoBehaviour
     [SerializeField] private bool autoFixSwayRecoilConflict = true;
 
     [Header("IG-88 Patrol")]
-    [Tooltip("Drag all 4 IG-88 root GameObjects here.")]
+    [Tooltip("Leave empty to auto-find every IG-88 in the scene. Patrol/detection settings now live on each droid's IG88Patrol component.")]
     [SerializeField] private IG88Controller[] ig88s;
-    [Tooltip("Drag the player (or camera) here — IG-88s will measure distance and aim at this.")]
+    [Tooltip("The player (or camera) the IG-88s should detect and aim at. Leave empty to use the object tagged 'Player', then the main camera.")]
     [SerializeField] private Transform playerTarget;
-    [SerializeField] private float ig88PatrolSpeed      = 2.5f;
-    [SerializeField] private float ig88StopDistance     = 5f;
-    [SerializeField] private float ig88PatrolDistance   = 15f;
-    [SerializeField] private float ig88DetectionInterval = 0.5f;
-    [SerializeField] private float ig88StepsPerSecond   = 1.8f;
 
     private bool blasterWasEnabled;
 
@@ -60,6 +55,19 @@ public class GameManager : MonoBehaviour
             blaster.Fired += OnWeaponFired;
             blasterWasEnabled = blaster.enabled;
         }
+
+        SetupIG88s();
+    }
+
+    private void SetupIG88s()
+    {
+        if (ig88s == null || ig88s.Length == 0)
+            ig88s = FindObjectsByType<IG88Controller>(FindObjectsSortMode.None);
+
+        if (playerTarget == null) return;   // each IG-88 falls back to the 'Player' tag / main camera on its own
+
+        foreach (var ig in ig88s)
+            if (ig != null) ig.SetPlayer(playerTarget);
     }
 
     private void OnDestroy()
@@ -70,19 +78,6 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
-        if (ig88s != null)
-        {
-            foreach (var ig in ig88s)
-            {
-                if (ig == null) continue;
-                ig.player            = playerTarget;
-                ig.moveSpeed         = ig88PatrolSpeed;
-                ig.stopDistance      = ig88StopDistance;
-                ig.patrolDistance    = ig88PatrolDistance;
-                ig.detectionInterval = ig88DetectionInterval;
-                ig.stepsPerSecond    = ig88StepsPerSecond;
-            }
-        }
         // Optional: also block firing when out of ammo by disabling the component temporarily
         if (blaster != null)
         {
