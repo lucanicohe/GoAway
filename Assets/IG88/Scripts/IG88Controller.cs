@@ -1,36 +1,42 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum IG88Route { Green, Red }
+public enum IG88EdgeKind { Green, Red, Yellow }
+public struct IG88Link { public int node; public IG88EdgeKind kind; }
+
 /// <summary>
 /// IG-88 droid controller. Put this on the droid's root object (the prefab already has it).
-/// - "Walking" checkbox      : plays a procedural walk cycle (legs, arms, hips, torso).
-/// - "Aim At Target" checkbox: waist/chest/head turn toward "Target" and the gun arm points the gun at it.
-/// Works with the bones that come inside IG88.fbx. No Animator or animation clip is needed.
+/// The GameManager spawns the droid and calls Init(). From then on the droid:
+///  - PATROLS its route (green or red) by walking from waypoint to waypoint along the drawn connections only.
+///  - CHASES the object tagged "Player" when closer than the GameManager chase radius
+///    (uses ALL connections incl. yellow, runs, aims at the player, turns the chase light on).
+///  - Goes back to its patrol when the player is farther away than the chase radius.
+///  - Never touches another droid: it waits until the other droid moves away.
+/// Procedural walk animation, no Animator needed.
 /// </summary>
 [DisallowMultipleComponent]
 [AddComponentMenu("IG88/IG88 Controller")]
 public class IG88Controller : MonoBehaviour
 {
-    [Header("TICK THESE")]
-    [Tooltip("Tick to play the walking animation.")]
+    [Header("Driven automatically (you don't need to touch these)")]
     public bool walking = false;
-
-    [Tooltip("Tick to make the upper body, head and gun arm aim at the Target. Untick to return to the rest pose.")]
-    public bool aimAtTarget = true;
-
-    [Tooltip("The object the droid aims at. Move this object around (in the Scene view) and the droid follows it.")]
+    public bool aimAtTarget = false;
     public Transform target;
 
-    [Header("Walk settings")]
-    [Range(0.2f, 3f)] public float stepsPerSecond = 1.1f;
+    [Header("Chase light (drag the Point Light inside the droid here)")]
+    public Light chaseLight;
+    [Tooltip("Seconds the light needs to fade between 0 and the GameManager intensity.")]
+    public float lightFadeTime = 0.2f;
+
+    [Header("Walk pose")]
     [Range(0f, 50f)] public float thighSwing = 26f;
     [Range(0f, 80f)] public float kneeBend = 38f;
     [Range(0f, 40f)] public float armSwing = 14f;
     [Range(0f, 0.1f)] public float bodyBob = 0.025f;
     [Range(0f, 15f)] public float torsoTwist = 4f;
-    [Tooltip("Also move the droid forward while walking (off = walks in place).")]
-    public bool moveWhileWalking = false;
-    public float moveSpeed = 0.9f;
+    [Tooltip("Walk pose is multiplied by this while chasing (bigger strides when running).")]
+    [Range(1f, 2.5f)] public float runPoseMultiplier = 1.35f;
 
     [Header("Aim settings")]
     [Tooltip("Max degrees the waist+chest may turn away from the front.")]
@@ -44,13 +50,15 @@ public class IG88Controller : MonoBehaviour
     [Range(0.02f, 1f)] public float aimSmoothTime = 0.15f;
     public bool drawGizmos = true;
 
+    // ------------------------------------------------------------------ rig
+
     class RigBone
     {
         public Transform t;
         public Vector3 restPos;
         public Quaternion restRot;
-        public Vector3 swingAxis; // bone-local axis: positive angle swings the front of a limb up
-        public Vector3 upAxis;    // bone-local up axis (for twisting)
+        public Vector3 swingAxis;
+        public Vector3 upAxis;
     }
 
     readonly List<RigBone> all = new List<RigBone>();
@@ -60,6 +68,31 @@ public class IG88Controller : MonoBehaviour
     Vector3 headFwdLocal = Vector3.forward;
     bool rigReady;
     float phase, walkWeight, aimWeight, yaw, yawVel;
+    float stepsPerSecond = 1.1f;
+    float poseScale = 1f;
+
+    // ------------------------------------------------------------------ AI state
+
+    enum Mode { Patrol, Chase }
+
+    GameManager gm;
+    IG88Route route;
+    Mode mode = Mode.Patrol;
+    bool ready;
+
+    int fromNode = -1;      // node we are on / just left
+    int toNode = -1;        // node we are walking to (-1 = standing on fromNode, need a new target)
+    int prevNode = -1;      // node we came from (patrol: don't turn back unless dead end)
+    int goalNode = -1;      // chase goal or "return to patrol" goal
+    bool returning;         // walking back to the patrol network after a chase
+
+    float blockedTime;
+    float blockLimit = 3f;
+    float backoffTimer;
+
+    const float ReverseMargin = 0.05f;
+    const float GoalHysteresis = 0.75f;
+    static readonly List<int> tmp = new List<int>();
 
     /// <summary>Direction the droid faces (world space, flattened).</summary>
     public Vector3 RestForward
@@ -68,6 +101,34 @@ public class IG88Controller : MonoBehaviour
     }
 
     void Awake() { DetectRig(); }
+
+    void OnDestroy()
+    {
+        if (gm != null) gm.Unregister(this);
+    }
+
+    /// <summary>Called by the GameManager right after spawning.</summary>
+    public void Init(GameManager manager, IG88Route patrolRoute, int startNode)
+    {
+        gm = manager;
+        route = patrolRoute;
+        mode = Mode.Patrol;
+        returning = false;
+        fromNode = startNode;
+        toNode = -1;
+        prevNode = -1;
+        goalNode = -1;
+        blockedTime = 0f;
+        blockLimit = Random.Range(2f, 4f);
+        backoffTimer = 0f;
+        aimAtTarget = false;
+        walking = false;
+        transform.position = gm.NodePos(startNode);
+        if (chaseLight != null) { chaseLight.enabled = true; chaseLight.intensity = 0f; }
+        ready = true;
+    }
+
+    // ------------------------------------------------------------------ rig detection (unchanged logic)
 
     RigBone Grab(Dictionary<string, Transform> map, string key, List<string> missing)
     {
@@ -110,7 +171,6 @@ public class IG88Controller : MonoBehaviour
         f.Normalize();
         restForwardLocal = transform.InverseTransformDirection(f);
 
-        // Hinge axis for walking: choose the sign so a positive angle lifts the front of a limb.
         Vector3 lateral = Vector3.Cross(up, f).normalized;
         Vector3 test = Quaternion.AngleAxis(10f, lateral) * f;
         if (Vector3.Dot(test, up) < 0f) lateral = -lateral;
@@ -126,6 +186,223 @@ public class IG88Controller : MonoBehaviour
         rigReady = true;
         return true;
     }
+
+    // ------------------------------------------------------------------ AI (movement happens in Update)
+
+    void Update()
+    {
+        if (!ready || gm == null) return;
+        float dt = Time.deltaTime;
+
+        UpdateMode();
+        walking = gm.DroidPatrolOff ? false : Think(dt); // Droid Patrol Off = stand still, do nothing
+
+        stepsPerSecond = (mode == Mode.Chase) ? gm.RunSteps : gm.PatrolSteps;
+        poseScale = Mathf.MoveTowards(poseScale, mode == Mode.Chase ? runPoseMultiplier : 1f, dt * 3f);
+        UpdateLight(dt);
+    }
+
+    void UpdateMode()
+    {
+        Transform p = gm.Player;
+        // Droid Off or Droid Patrol Off: never chase / target the player
+        bool canChase = !gm.DroidOff && !gm.DroidPatrolOff;
+        bool inRange = canChase && p != null && Vector3.Distance(transform.position, p.position) < gm.ChaseRadius;
+
+        if (inRange && mode == Mode.Patrol)
+        {
+            mode = Mode.Chase;
+            returning = false;
+            goalNode = -1;
+            blockedTime = 0f;
+            backoffTimer = 0f;
+            aimAtTarget = true;
+        }
+        else if (!inRange && mode == Mode.Chase)
+        {
+            mode = Mode.Patrol;
+            aimAtTarget = false;
+            BeginReturnToPatrol();
+        }
+
+        if (mode == Mode.Chase && p != null) target = p; // target = object tagged Player, found automatically
+    }
+
+    bool Matches(IG88EdgeKind kind)
+    {
+        return route == IG88Route.Green ? kind == IG88EdgeKind.Green : kind == IG88EdgeKind.Red;
+    }
+
+    void BeginReturnToPatrol()
+    {
+        if (toNode >= 0) returning = !Matches(gm.EdgeKindOf(fromNode, toNode));
+        else returning = !gm.NodeInRoute(fromNode, route);
+
+        if (returning)
+        {
+            goalNode = NearestRouteNode();
+            if (goalNode < 0) returning = false;
+        }
+    }
+
+    // nearest node that belongs to my patrol route, measured along the connections
+    int NearestRouteNode()
+    {
+        int[] nodes = gm.RouteNodes(route);
+        Vector3 pos = transform.position;
+        int best = -1;
+        float bestCost = float.MaxValue;
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            int n = nodes[i];
+            float cost;
+            if (toNode >= 0)
+            {
+                float viaTo = Vector3.Distance(pos, gm.NodePos(toNode)) + gm.PathDist(toNode, n);
+                float viaFrom = Vector3.Distance(pos, gm.NodePos(fromNode)) + gm.PathDist(fromNode, n);
+                cost = Mathf.Min(viaTo, viaFrom);
+            }
+            else cost = gm.PathDist(fromNode, n);
+
+            if (cost < bestCost) { bestCost = cost; best = n; }
+        }
+        return best;
+    }
+
+    void UpdateChaseGoal(Transform player)
+    {
+        if (player == null) return;
+        int best = gm.NearestNode(player.position);
+        if (best < 0) return;
+        if (goalNode < 0)
+        {
+            goalNode = best;
+        }
+        else if (best != goalNode)
+        {
+            float dBest = Vector3.Distance(player.position, gm.NodePos(best));
+            float dCur = Vector3.Distance(player.position, gm.NodePos(goalNode));
+            if (dBest + GoalHysteresis < dCur) goalNode = best; // hysteresis stops flip-flopping between 2 nodes
+        }
+    }
+
+    // standing on fromNode: which node do we walk to next? (-1 = stay)
+    int ChooseNext()
+    {
+        if (mode == Mode.Chase || returning)
+        {
+            if (goalNode < 0 || goalNode == fromNode) return -1;
+            return gm.NextHop(fromNode, goalNode);
+        }
+
+        // patrol: random walk over the connections of MY route only, no turning back unless dead end
+        tmp.Clear();
+        List<IG88Link> links = gm.Links(fromNode);
+        for (int i = 0; i < links.Count; i++)
+            if (Matches(links[i].kind)) tmp.Add(links[i].node);
+        if (tmp.Count == 0) return -1;
+        if (tmp.Count > 1) tmp.Remove(prevNode);
+        return tmp[Random.Range(0, tmp.Count)];
+    }
+
+    void Reverse()
+    {
+        int t = fromNode; fromNode = toNode; toNode = t;
+        if (mode == Mode.Chase || returning) backoffTimer = 1.5f; // don't instantly turn around again
+    }
+
+    /// <summary>Robotic turn: rotates at a constant speed. Returns true when facing the direction.</summary>
+    bool FaceDirection(Vector3 dir, float dt)
+    {
+        Vector3 up = transform.up;
+        Vector3 flat = Vector3.ProjectOnPlane(dir, up);
+        if (flat.sqrMagnitude < 1e-6f) return true;
+        float ang = Vector3.SignedAngle(RestForward, flat, up);
+        float maxStep = gm.TurnSpeed * dt;
+        float step = Mathf.Clamp(ang, -maxStep, maxStep);
+        transform.rotation = Quaternion.AngleAxis(step, up) * transform.rotation;
+        return Mathf.Abs(ang - step) < 4f;
+    }
+
+    /// <summary>Returns true when the droid actually moved this frame (drives the walk animation).</summary>
+    bool Think(float dt)
+    {
+        if (backoffTimer > 0f) backoffTimer -= dt;
+        Transform player = gm.Player;
+
+        if (mode == Mode.Chase) UpdateChaseGoal(player);
+
+        // standing on a node -> decide where to go
+        if (toNode < 0)
+        {
+            if (backoffTimer > 0f) return false;
+            if (returning && fromNode == goalNode) returning = false;
+            toNode = ChooseNext();
+            if (toNode < 0) return false;
+        }
+
+        Vector3 pos = transform.position;
+
+        // chase: droids are ranged, not melee. Once inside firing distance, hold position (aim stays on the player).
+        // If the player backs away beyond the firing distance, the droid moves toward him again.
+        if (mode == Mode.Chase && player != null && gm.FiringDistance > 0f &&
+            Vector3.Distance(pos, player.position) <= gm.FiringDistance)
+            return false;
+
+        // chase / returning: if the goal is now behind us, turn around in the middle of the connection
+        if ((mode == Mode.Chase || returning) && goalNode >= 0 && backoffTimer <= 0f)
+        {
+            float fwd = Vector3.Distance(pos, gm.NodePos(toNode)) + gm.PathDist(toNode, goalNode);
+            float back = Vector3.Distance(pos, gm.NodePos(fromNode)) + gm.PathDist(fromNode, goalNode);
+            if (back + ReverseMargin < fwd) Reverse();
+        }
+
+        Vector3 tp = gm.NodePos(toNode);
+        Vector3 dir = tp - pos;
+        float dist = dir.magnitude;
+
+        // robotic: first turn on the spot, then walk in a straight line
+        if (dist > 0.0001f && !FaceDirection(dir / dist, dt)) return false;
+
+        float speed = (mode == Mode.Chase) ? gm.RunSpeed : gm.PatrolSpeed;
+        float step = speed * dt;
+        bool arrives = dist <= step;
+        Vector3 newPos = arrives ? tp : pos + dir / dist * step;
+
+        // never touch another droid: wait until it moves away
+        if (gm.WouldCollide(this, newPos))
+        {
+            blockedTime += dt;
+            if (blockedTime >= blockLimit)
+            {
+                // head-on / circular deadlock: back off
+                blockedTime = 0f;
+                blockLimit = Random.Range(2f, 4f);
+                Reverse();
+            }
+            return false;
+        }
+        blockedTime = 0f;
+
+        transform.position = newPos;
+        if (arrives)
+        {
+            prevNode = fromNode;
+            fromNode = toNode;
+            toNode = -1;
+        }
+        return true;
+    }
+
+    void UpdateLight(float dt)
+    {
+        if (chaseLight == null) return;
+        float goal = (mode == Mode.Chase) ? gm.ChaseLightIntensity : 0f;
+        float rate = Mathf.Max(gm.ChaseLightIntensity, 0.0001f) / Mathf.Max(lightFadeTime, 0.01f);
+        chaseLight.intensity = Mathf.MoveTowards(chaseLight.intensity, goal, rate * dt);
+    }
+
+    // ------------------------------------------------------------------ procedural animation
 
     void Swing(RigBone b, float deg) { b.t.localRotation = b.t.localRotation * Quaternion.AngleAxis(deg, b.swingAxis); }
     void Twist(RigBone b, float deg) { b.t.localRotation = b.t.localRotation * Quaternion.AngleAxis(deg, b.upAxis); }
@@ -151,8 +428,6 @@ public class IG88Controller : MonoBehaviour
         {
             phase = Mathf.Repeat(phase + stepsPerSecond * 2f * Mathf.PI * dt, 2f * Mathf.PI);
             ApplyWalk(walkWeight);
-            if (moveWhileWalking)
-                transform.position += RestForward * (moveSpeed * walkWeight * dt);
         }
 
         float aimGoal = (aimAtTarget && target != null) ? 1f : 0f;
@@ -163,11 +438,11 @@ public class IG88Controller : MonoBehaviour
 
     void Leg(RigBone thigh, RigBone shin, RigBone foot, float s, float c, float w)
     {
-        float t = thighSwing * s * w;                 // + = leg swings forward
-        float knee = kneeBend * Mathf.Max(0f, c) * w; // knee bends while the leg moves forward
+        float t = thighSwing * poseScale * s * w;
+        float knee = kneeBend * poseScale * Mathf.Max(0f, c) * w;
         Swing(thigh, t);
         Swing(shin, -knee);
-        Swing(foot, (knee - t) * 0.8f);               // keep the foot roughly level
+        Swing(foot, (knee - t) * 0.8f);
     }
 
     void ApplyWalk(float w)
@@ -176,8 +451,8 @@ public class IG88Controller : MonoBehaviour
         float sR = Mathf.Sin(phase + Mathf.PI), cR = Mathf.Cos(phase + Mathf.PI);
         Leg(thighL, shinL, footL, sL, cL, w);
         Leg(thighR, shinR, footR, sR, cR, w);
-        Swing(armL, -armSwing * sL * w);
-        Swing(armR, armSwing * 0.25f * sL * w);       // gun arm only sways a little
+        Swing(armL, -armSwing * poseScale * sL * w);
+        Swing(armR, armSwing * 0.25f * poseScale * sL * w);
         Twist(waist, torsoTwist * sL * w);
         float bob = bodyBob * Mathf.Cos(2f * phase) * w;
         Transform p = pelvis.t.parent;
