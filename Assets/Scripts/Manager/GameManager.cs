@@ -58,7 +58,7 @@ public class GameManager : MonoBehaviour
     [Header("IG-88 Spawning")]
     [Tooltip("Drag your IG88 prefab here (it must have the IG88Controller on its root).")]
     [SerializeField] private IG88Controller ig88Prefab;
-    [Tooltip("How many droids to spawn. Max = 11 (one per waypoint, G1 and R1 included). They alternate: green patrol, red patrol, green, red ...")]
+    [Tooltip("How many droids to spawn. Max = 11 (one per waypoint, G1 and R1 included). They alternate: green patrol, red patrol, green, red ... Every start one droid stands on G2 and one on R2 or R3; the rest are spread out on free waypoints.")]
     [Range(0, MaxDroids)]
     [SerializeField] private int droidCount = 4;
 
@@ -644,10 +644,28 @@ public class GameManager : MonoBehaviour
         if (!graphReady) return;
 
         int count = Mathf.Clamp(droidCount, 0, MaxDroids);
+
+        // Guaranteed start spots: every start one droid stands on G2 (green) and one on R2 or R3 (red, picked at random).
+        // With only 1 droid, one of those two spots is used (at random).
+        int[] forcedNodes = { G2, Random.value < 0.5f ? R2 : R3 };
+        IG88Route[] forcedRoutes = { IG88Route.Green, IG88Route.Red };
+        int firstForced = (count == 1 && Random.value < 0.5f) ? 1 : 0;
+
         for (int i = 0; i < count; i++)
         {
             IG88Route route = (i % 2 == 0) ? IG88Route.Green : IG88Route.Red;
-            int node = PickFreeNode(route);
+            int node = -1;
+
+            int fi = i + firstForced;
+            if (fi < forcedNodes.Length)
+            {
+                int n = forcedNodes[fi];
+                if (!NodeFree(n) && forcedRoutes[fi] == IG88Route.Red)
+                    n = (n == R2) ? R3 : R2;                 // the other red spot
+                if (NodeFree(n)) { node = n; route = forcedRoutes[fi]; }
+            }
+            if (node < 0)
+                node = PickFreeNode(route);
             if (node < 0)
             {
                 route = (route == IG88Route.Green) ? IG88Route.Red : IG88Route.Green;
@@ -671,6 +689,18 @@ public class GameManager : MonoBehaviour
         for (int i = droids.Count - 1; i >= 0; i--)
             if (droids[i] != null) Destroy(droids[i].gameObject);
         droids.Clear();
+    }
+
+    // true if no droid stands within 'Min Droid Distance' of that waypoint
+    private bool NodeFree(int node)
+    {
+        Vector3 p = NodePos(node);
+        for (int d = 0; d < droids.Count; d++)
+        {
+            if (droids[d] == null) continue;
+            if (Vector3.Distance(droids[d].transform.position, p) < minDroidDistance) return false;
+        }
+        return true;
     }
 
     // picks the free waypoint that is farthest from the droids already placed, so droids start spread out
