@@ -24,6 +24,19 @@ public class IG88Controller : MonoBehaviour
     public bool aimAtTarget = false;
     public Transform target;
 
+    [Header("Health (set by GameManager when the droid spawns)")]
+    public float health = 1f;
+
+    [Header("Death: break apart")]
+    [Tooltip("How hard the pieces are thrown away when the droid dies.")]
+    public float scatterForce = 3f;
+    [Tooltip("How fast the pieces tumble.")]
+    public float spinForce = 4f;
+    [Tooltip("Size of the collider of pieces that have no child bone (head, feet, gun), in metres.")]
+    [Range(0.05f, 0.4f)] public float leafPieceSize = 0.12f;
+    [Tooltip("Seconds until the pieces disappear. 0 = they stay on the ground forever.")]
+    public float debrisLifetime = 0f;
+
     [Header("Chase light (drag the Point Light inside the droid here)")]
     public Light chaseLight;
     [Tooltip("Seconds the light needs to fade between 0 and the GameManager intensity.")]
@@ -100,7 +113,7 @@ public class IG88Controller : MonoBehaviour
         get { return Vector3.ProjectOnPlane(transform.TransformDirection(restForwardLocal), transform.up).normalized; }
     }
 
-    void Awake() { DetectRig(); }
+    void Awake() { DetectRig(); EnsureHitCollider(); }
 
     void OnDestroy()
     {
@@ -123,6 +136,8 @@ public class IG88Controller : MonoBehaviour
         backoffTimer = 0f;
         aimAtTarget = false;
         walking = false;
+        IsDead = false;
+        health = gm.DroidHealth;
         transform.position = gm.NodePos(startNode);
         if (chaseLight != null) { chaseLight.enabled = true; chaseLight.intensity = 0f; }
         ready = true;
@@ -185,6 +200,147 @@ public class IG88Controller : MonoBehaviour
         headFwdLocal = head.t.InverseTransformDirection(f);
         rigReady = true;
         return true;
+    }
+
+    // ------------------------------------------------------------------ health / death
+
+    public bool IsDead { get; private set; }
+
+    /// <summary>Damage from any source. When health reaches 0 the droid breaks apart.</summary>
+    public void TakeDamage(float amount, Vector3 hitPoint, Vector3 hitDirection)
+    {
+        if (IsDead || !ready) return;
+        health -= amount;
+        if (health <= 0f) Die(hitPoint, hitDirection);
+    }
+
+    void Die(Vector3 hitPoint, Vector3 hitDirection)
+    {
+        IsDead = true;
+        ready = false;
+        walking = false;
+        aimAtTarget = false;
+        if (chaseLight != null) { chaseLight.intensity = 0f; chaseLight.enabled = false; }
+        if (gm != null) gm.Unregister(this); // a dead droid no longer blocks the living ones
+        BreakApart(hitPoint, hitDirection);
+        enabled = false; // stops Update/LateUpdate, otherwise the pose reset would snap the bones back
+    }
+
+    // If the prefab has no solid collider, bolts would fly through the droid. Make one from the renderer bounds.
+    void EnsureHitCollider()
+    {
+        Collider[] existing = GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < existing.Length; i++)
+            if (existing[i].enabled && !existing[i].isTrigger) return;
+
+        Renderer[] rs = GetComponentsInChildren<Renderer>(true);
+        if (rs.Length == 0) return;
+        Bounds b = rs[0].bounds;
+        for (int i = 1; i < rs.Length; i++) b.Encapsulate(rs[i].bounds);
+
+        Vector3 s = transform.lossyScale;
+        float sx = Mathf.Max(Mathf.Abs(s.x), 0.0001f), sy = Mathf.Max(Mathf.Abs(s.y), 0.0001f), sz = Mathf.Max(Mathf.Abs(s.z), 0.0001f);
+        CapsuleCollider cap = gameObject.AddComponent<CapsuleCollider>();
+        cap.direction = 1;
+        cap.center = transform.InverseTransformPoint(b.center);
+        cap.height = b.size.y / sy;
+        cap.radius = Mathf.Clamp((b.size.x / sx + b.size.z / sz) * 0.25f, 0.05f, cap.height * 0.5f);
+
+        // a moving collider should have a kinematic rigidbody
+        if (GetComponent<Rigidbody>() == null)
+            gameObject.AddComponent<Rigidbody>().isKinematic = true;
+    }
+
+    void AddPiece(List<Transform> list, Transform t)
+    {
+        if (t == null || t == transform || !t.IsChildOf(transform)) return;
+        if (!list.Contains(t)) list.Add(t);
+    }
+
+    // box that covers the bone and the points of its child bones, in the bone's own space (works for any bone orientation)
+    BoxCollider AddPieceCollider(Transform p)
+    {
+        Bounds b = new Bounds(Vector3.zero, Vector3.zero);
+        float longest = 0f;
+        for (int i = 0; i < p.childCount; i++)
+        {
+            Transform c = p.GetChild(i);
+            b.Encapsulate(p.InverseTransformPoint(c.position));
+            longest = Mathf.Max(longest, Vector3.Distance(p.position, c.position));
+        }
+        float thick = longest > 0.001f ? Mathf.Clamp(longest * 0.35f, 0.04f, 0.18f) : leafPieceSize;
+        Vector3 s = p.lossyScale;
+        Vector3 pad = new Vector3(thick / Mathf.Max(Mathf.Abs(s.x), 0.0001f),
+                                  thick / Mathf.Max(Mathf.Abs(s.y), 0.0001f),
+                                  thick / Mathf.Max(Mathf.Abs(s.z), 0.0001f));
+        BoxCollider box = p.gameObject.AddComponent<BoxCollider>();
+        box.center = b.center;
+        box.size = b.size + pad;
+        return box;
+    }
+
+    /// <summary>Every rigged part (head, arms, thighs, shins, feet, gun ...) is cut loose and becomes a falling rigidbody.</summary>
+    void BreakApart(Vector3 hitPoint, Vector3 hitDirection)
+    {
+        // old colliders (the hit capsule) would fight with the pieces
+        Collider[] oldCols = GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < oldCols.Length; i++) oldCols[i].enabled = false;
+
+        // which bones become pieces: everything the skinned mesh is bound to + the known rig bones
+        List<Transform> pieces = new List<Transform>();
+        SkinnedMeshRenderer[] skins = GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        for (int s = 0; s < skins.Length; s++)
+        {
+            skins[s].updateWhenOffscreen = true; // bounds follow the falling bones, mesh is not culled
+            Transform[] bones = skins[s].bones;
+            for (int i = 0; i < bones.Length; i++) AddPiece(pieces, bones[i]);
+        }
+        for (int i = 0; i < all.Count; i++)
+            if (all[i] != gunTip) AddPiece(pieces, all[i].t);
+        if (pieces.Count == 0) return;
+
+        // 1) a collider per piece, measured while the skeleton is still connected
+        BoxCollider[] boxes = new BoxCollider[pieces.Count];
+        for (int i = 0; i < pieces.Count; i++) boxes[i] = AddPieceCollider(pieces[i]);
+
+        // 2) cut every piece loose from its parent (world position stays the same)
+        Transform debris = new GameObject(name + " Debris").transform;
+        for (int i = 0; i < pieces.Count; i++) pieces[i].SetParent(debris, true);
+
+        // 3) physics + scatter, away from the hit point and along the bolt direction
+        Vector3 dir = hitDirection.sqrMagnitude > 1e-6f ? hitDirection.normalized : Vector3.zero;
+        for (int i = 0; i < pieces.Count; i++)
+        {
+            Transform p = pieces[i];
+            Rigidbody body = p.GetComponent<Rigidbody>();
+            if (body == null) body = p.gameObject.AddComponent<Rigidbody>();
+            body.isKinematic = false;
+            body.useGravity = true;
+            body.mass = 1f;
+            body.maxDepenetrationVelocity = 3f; // pieces start overlapping at the joints, don't let them pop apart violently
+
+            Vector3 away = p.position - hitPoint;
+            if (away.sqrMagnitude < 1e-4f) away = Random.onUnitSphere;
+            away.Normalize();
+
+            Vector3 v = dir * scatterForce
+                      + away * (scatterForce * 0.5f)
+                      + Vector3.up * (scatterForce * 0.4f)
+                      + Random.insideUnitSphere * (scatterForce * 0.3f);
+            body.AddForce(v, ForceMode.VelocityChange);
+            body.AddTorque(Random.onUnitSphere * spinForce, ForceMode.VelocityChange);
+        }
+
+        // pieces of the same droid never collide with each other
+        for (int i = 0; i < boxes.Length; i++)
+            for (int j = i + 1; j < boxes.Length; j++)
+                Physics.IgnoreCollision(boxes[i], boxes[j]);
+
+        if (debrisLifetime > 0f)
+        {
+            Destroy(debris.gameObject, debrisLifetime);
+            Destroy(gameObject, debrisLifetime);
+        }
     }
 
     // ------------------------------------------------------------------ AI (movement happens in Update)

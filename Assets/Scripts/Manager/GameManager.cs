@@ -44,6 +44,10 @@ public class GameManager : MonoBehaviour
     [Tooltip("How many droids to spawn. Max = 11 (one per waypoint). They alternate: green patrol, red patrol, green, red ...")]
     [Range(0, MaxDroids)]
     [SerializeField] private int droidCount = 4;
+    [Tooltip("Health of every droid, applied when it spawns. It is reduced by the 'Damage' of your BlasterWeapon (25 by default). " +
+             "1 = any hit kills (1 shot). 100 = 4 shots with the default damage. At 0 the droid breaks apart.")]
+    [Min(0.01f)]
+    [SerializeField] private float droidHealth = 1f;
 
     [Header("IG-88 Detection / Chase")]
     [Tooltip("A droid starts chasing when the Player (tag 'Player') is closer than this. It stops when the player is farther away.")]
@@ -136,6 +140,7 @@ public class GameManager : MonoBehaviour
     float nextPlayerSearch;
 
     // ---------- public read-only values used by the droids ----------
+    public float DroidHealth => droidHealth;
     public bool DroidOff => droidOff;
     public bool DroidPatrolOff => droidPatrolOff;
     public float ChaseRadius => chaseRadius;
@@ -192,6 +197,25 @@ public class GameManager : MonoBehaviour
         }
 
         SpawnDroids();
+    }
+
+    private void OnEnable()
+    {
+        BlasterWeapon.AnyHit += OnBlasterHit;
+    }
+
+    private void OnDisable()
+    {
+        BlasterWeapon.AnyHit -= OnBlasterHit;
+    }
+
+    // Every blaster hit in the scene: if the thing that was hit belongs to a droid, damage that droid.
+    private void OnBlasterHit(BlasterHitInfo info)
+    {
+        if (info.collider == null) return;
+        IG88Controller droid = info.collider.GetComponentInParent<IG88Controller>();
+        if (droid != null)
+            droid.TakeDamage(info.damage, info.point, info.direction);
     }
 
     private void OnDestroy()
