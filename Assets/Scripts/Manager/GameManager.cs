@@ -7,9 +7,9 @@ using TMPro;
 [DefaultExecutionOrder(-50)] // runs before most player scripts
 public class GameManager : MonoBehaviour
 {
-    // One droid per usable waypoint is the physical maximum. There are 11 waypoints, but G1 and R1 are too close
-    // to the player's start and are never used as spawn / patrol points, so 9 are left.
-    public const int MaxDroids = 9;
+    // One droid per waypoint is the physical maximum: there are 11 waypoints (G1-G6, R1-R5) and droids
+    // can spawn and patrol on all of them.
+    public const int MaxDroids = 11;
 
     [Header("Ammo")]
     [SerializeField] private int maxAmmo = 30;
@@ -58,7 +58,7 @@ public class GameManager : MonoBehaviour
     [Header("IG-88 Spawning")]
     [Tooltip("Drag your IG88 prefab here (it must have the IG88Controller on its root).")]
     [SerializeField] private IG88Controller ig88Prefab;
-    [Tooltip("How many droids to spawn. Max = 9 (one per usable waypoint; G1 and R1 are never used as spawn points). They alternate: green patrol, red patrol, green, red ...")]
+    [Tooltip("How many droids to spawn. Max = 11 (one per waypoint, G1 and R1 included). They alternate: green patrol, red patrol, green, red ...")]
     [Range(0, MaxDroids)]
     [SerializeField] private int droidCount = 4;
 
@@ -187,9 +187,9 @@ public class GameManager : MonoBehaviour
     static readonly int[] GreenNodes = { G1, G2, G3, G4, G5, G6 };
     static readonly int[] RedNodes = { R1, R2, R3, R4, R5, G3 };
 
-    // G1 and R1 are too close to the player's start: no droid spawns on them and no droid patrols to them.
-    // Droids can still walk to / through them while CHASING the player (and when returning to their patrol).
-    static readonly int[] NoPatrolNodes = { G1, R1 };
+    // Waypoints where droids may NOT spawn or patrol (chase-only). Empty now: droids spawn and patrol on
+    // G1 and R1 like on every other waypoint. To block a waypoint again, list it here, for example { G1, R1 }.
+    static readonly int[] NoPatrolNodes = { };
 
     /// <summary>True for waypoints where droids may not spawn or patrol (they are chase-only).</summary>
     public bool IsNoPatrolNode(int node)
@@ -283,7 +283,7 @@ public class GameManager : MonoBehaviour
     private float[] bloodAlphas = new float[0];   // current alpha of every blood Image (same order as the list)
     private float bloodFadeRate;                  // alpha per second, set at the moment an Image turns on
 
-    // an old scene may still have 10 or 11 saved: clamp it to the new maximum
+    // keep the saved droid count inside the allowed range
     private void OnValidate()
     {
         droidCount = Mathf.Clamp(droidCount, 0, MaxDroids);
@@ -674,7 +674,6 @@ public class GameManager : MonoBehaviour
     }
 
     // picks the free waypoint that is farthest from the droids already placed, so droids start spread out
-    // (G1 and R1 are never picked: too close to the player's start)
     private int PickFreeNode(IG88Route route)
     {
         int[] list = RouteNodes(route);
