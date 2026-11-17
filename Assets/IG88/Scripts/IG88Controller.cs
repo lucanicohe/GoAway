@@ -8,11 +8,17 @@ public struct IG88Link { public int node; public IG88EdgeKind kind; }
 /// <summary>
 /// IG-88 droid controller. Put this on the droid's root object (the prefab already has it).
 /// The GameManager spawns the droid and calls Init(). From then on the droid:
-///  - PATROLS its route (green or red) by walking from waypoint to waypoint along the drawn connections only.
-///  - CHASES the object tagged "Player" when closer than the GameManager chase radius
-///    (uses ALL connections incl. yellow, runs, aims at the player, turns the chase light on).
-///  - Goes back to its patrol when the player is farther away than the chase radius.
+///  - PATROLS its route (green or red) at walk speed, along the drawn connections only.
+///  - DETECTS the player (tag "Player") by SIGHT (clear line of sight, up to the Sight Range) or, in close quarters,
+///    by the Detection Radius (no sight needed). It then walks toward him right away at the SAME walk speed
+///    (all connections incl. yellow), aims, and shoots red bolts. There is no firing delay.
+///  - Starts shooting the moment it detects the player by sight, and shoots ONLY while it can see him (never into walls,
+///    never from a mere close-quarters detection through a wall); it keeps walking toward him until it has sight.
+///  - Stops 1 m from the player.
+///  - Goes back to its patrol when it has neither seen nor sensed the player for 'Lose Sight Time' seconds.
+///  - Never spawns on or patrols to G1 / R1 (too close to the player's start). Chasing may still go there.
 ///  - Never touches another droid: it waits until the other droid moves away.
+///  - Has health. At 0 every rigged part breaks loose and falls to the ground.
 /// Procedural walk animation, no Animator needed.
 /// </summary>
 [DisallowMultipleComponent]
@@ -37,10 +43,9 @@ public class IG88Controller : MonoBehaviour
     [Tooltip("Seconds until the pieces disappear. 0 = they stay on the ground forever.")]
     public float debrisLifetime = 0f;
 
-    [Header("Chase light (drag the Point Light inside the droid here)")]
+    [Header("Droid light (drag the Point Light inside the droid here)")]
+    [Tooltip("Always on. Intensity comes from the GameManager, colour is green (calm) / red (chase).")]
     public Light chaseLight;
-    [Tooltip("Seconds the light needs to fade between 0 and the GameManager intensity.")]
-    public float lightFadeTime = 0.2f;
 
     [Header("Walk pose")]
     [Range(0f, 50f)] public float thighSwing = 26f;
@@ -48,8 +53,6 @@ public class IG88Controller : MonoBehaviour
     [Range(0f, 40f)] public float armSwing = 14f;
     [Range(0f, 0.1f)] public float bodyBob = 0.025f;
     [Range(0f, 15f)] public float torsoTwist = 4f;
-    [Tooltip("Walk pose is multiplied by this while chasing (bigger strides when running).")]
-    [Range(1f, 2.5f)] public float runPoseMultiplier = 1.35f;
 
     [Header("Aim settings")]
     [Tooltip("Max degrees the waist+chest may turn away from the front.")]
@@ -61,6 +64,8 @@ public class IG88Controller : MonoBehaviour
     [Tooltip("Max degrees the gun arm may rotate away from its rest pose.")]
     [Range(0f, 180f)] public float maxArmTurn = 110f;
     [Range(0.02f, 1f)] public float aimSmoothTime = 0.15f;
+    [Tooltip("The droid only fires when its gun points at the player within this many degrees.")]
+    [Range(5f, 90f)] public float maxFireAngle = 35f;
     public bool drawGizmos = true;
 
     // ------------------------------------------------------------------ rig
@@ -82,7 +87,6 @@ public class IG88Controller : MonoBehaviour
     bool rigReady;
     float phase, walkWeight, aimWeight, yaw, yawVel;
     float stepsPerSecond = 1.1f;
-    float poseScale = 1f;
 
     // ------------------------------------------------------------------ AI state
 
@@ -103,8 +107,39 @@ public class IG88Controller : MonoBehaviour
     float blockLimit = 3f;
     float backoffTimer;
 
+    float lastAwareTime;    // last moment the droid saw / sensed the player (a chase ends 'Lose Sight Time' seconds after this)
+    bool seesPlayer;        // this frame: player within Sight Range and a clear line of sight from the droid's head (updated in UpdateMode)
+    float nextFireTime;
+    Vector3 aimPoint;       // where the droid aims (centre of the player)
+
+    // look (light + glow)
+    float alertBlend;       // 0 = calm (green), 1 = chase (red)
+    // one entry per glow material instance of this droid
+    class GlowMat
+    {
+        public Material m;
+        public int emisColorId = -1;   // emission colour = the HDR tint next to the Emission Map
+        public float emisIntensity;    // HDR strength taken from the material's original emission colour
+        public int baseColorId = -1;   // base colour (_BaseColor in URP, _Color in built-in)
+        public float baseBrightness;
+        public float baseAlpha;
+    }
+    readonly List<GlowMat> glowMats = new List<GlowMat>();
+    static readonly string[] EmissionColorNames = { "_EmissionColor", "_EmissiveColor", "_Emission", "_EmissionTint" };
+    static readonly string[] EmissionMapNames = { "_EmissionMap", "_EmissiveColorMap" };
+    static readonly string[] BaseColorNames = { "_BaseColor", "_Color" };
+    static readonly string[] BaseMapNames = { "_BaseMap", "_MainTex" };
+    static readonly Dictionary<Texture, Texture2D> maskMapCache = new Dictionary<Texture, Texture2D>();
+    static bool glowLogged;
+
+    // patrol zone
+    int[] homeHops;                                  // connections from my home waypoint, along my own route
+    static readonly List<int> tmp2 = new List<int>();
+
     const float ReverseMargin = 0.05f;
     const float GoalHysteresis = 0.75f;
+    const float CloseDistance = 1f;     // chasing droids walk until they are this close to the player
+    const float LookFadeTime = 0.2f;    // green <-> red fade
     static readonly List<int> tmp = new List<int>();
 
     /// <summary>Direction the droid faces (world space, flattened).</summary>
@@ -118,6 +153,8 @@ public class IG88Controller : MonoBehaviour
     void OnDestroy()
     {
         if (gm != null) gm.Unregister(this);
+        for (int i = 0; i < glowMats.Count; i++)
+            if (glowMats[i].m != null) Destroy(glowMats[i].m);
     }
 
     /// <summary>Called by the GameManager right after spawning.</summary>
@@ -138,9 +175,184 @@ public class IG88Controller : MonoBehaviour
         walking = false;
         IsDead = false;
         health = gm.DroidHealth;
+        alertBlend = 0f;
+        homeHops = gm.RouteHops(route, startNode);   // my home = the waypoint I spawned on
         transform.position = gm.NodePos(startNode);
-        if (chaseLight != null) { chaseLight.enabled = true; chaseLight.intensity = 0f; }
+        SetupGlow();
+        UpdateLook(0f);
         ready = true;
+    }
+
+    // ------------------------------------------------------------------ light + glow material
+
+    static bool IsGlowMaterial(Material m, Material src)
+    {
+        if (m == src) return true;
+        string n = m.name;
+        if (n.EndsWith(" (Instance)")) n = n.Substring(0, n.Length - 11);
+        return n == src.name;
+    }
+
+    static string FindName(Material m, string[] names)
+    {
+        for (int i = 0; i < names.Length; i++)
+            if (m.HasProperty(names[i])) return names[i];
+        return null;
+    }
+
+    // custom shaders (Shader Graph): any colour property with "emi" or "glow" in its name
+    static string FindColorByKeyword(Material m, string a, string b)
+    {
+        Shader sh = m.shader;
+        for (int i = 0; i < sh.GetPropertyCount(); i++)
+        {
+            if (sh.GetPropertyType(i) != UnityEngine.Rendering.ShaderPropertyType.Color) continue;
+            string n = sh.GetPropertyName(i);
+            string low = n.ToLowerInvariant();
+            if (low.Contains(a) || low.Contains(b)) return n;
+        }
+        return null;
+    }
+
+    static string DescribeShader(Material m)
+    {
+        Shader sh = m.shader;
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+        sb.Append("shader '").Append(sh.name).Append("', colour properties: ");
+        for (int i = 0; i < sh.GetPropertyCount(); i++)
+            if (sh.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Color) sb.Append(sh.GetPropertyName(i)).Append(' ');
+        sb.Append(", texture properties: ");
+        for (int i = 0; i < sh.GetPropertyCount(); i++)
+            if (sh.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Texture) sb.Append(sh.GetPropertyName(i)).Append(' ');
+        return sb.ToString();
+    }
+
+    // Every droid gets its own copy of the glow material (the asset is never changed).
+    // The glow colour is NOT taken from what the material looks like now: green and red are set explicitly
+    // (colours from the GameManager). Texture maps are turned into brightness masks, so the tint decides the colour.
+    void SetupGlow()
+    {
+        glowMats.Clear();
+        Material src = gm.DroidGlowMaterial;
+        if (src == null) return;
+
+        string emisColorName = FindName(src, EmissionColorNames) ?? FindColorByKeyword(src, "emi", "glow");
+        if (emisColorName == null)
+        {
+            Debug.LogWarning("IG88Controller: can't find an emission colour on the glow material. " + DescribeShader(src), this);
+            return;
+        }
+        string emisMapName = FindName(src, EmissionMapNames);
+        string baseColorName = FindName(src, BaseColorNames);
+        string baseMapName = FindName(src, BaseMapNames);
+
+        Renderer[] rs = GetComponentsInChildren<Renderer>(true);
+        for (int r = 0; r < rs.Length; r++)
+        {
+            Material[] shared = rs[r].sharedMaterials;
+            bool changed = false;
+            for (int i = 0; i < shared.Length; i++)
+            {
+                if (shared[i] == null || !IsGlowMaterial(shared[i], src)) continue;
+
+                GlowMat g = new GlowMat();
+                g.m = new Material(shared[i]);
+                g.m.name = src.name + " (droid)";
+                g.m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+
+                // emission: strength from the original, colour from the GameManager, map -> brightness mask
+                g.emisColorId = Shader.PropertyToID(emisColorName);
+                Texture eMap = emisMapName != null ? g.m.GetTexture(emisMapName) : null;
+                g.emisIntensity = g.m.GetColor(g.emisColorId).maxColorComponent;
+                if (g.emisIntensity < 0.01f) g.emisIntensity = (eMap != null) ? 1f : 2f;
+                if (eMap != null) g.m.SetTexture(emisMapName, GetMaskMap(eMap));
+
+                // base colour / base map: same idea, so no red-orange surface colour is left over
+                if (baseColorName != null)
+                {
+                    g.baseColorId = Shader.PropertyToID(baseColorName);
+                    Color b = g.m.GetColor(g.baseColorId);
+                    g.baseBrightness = b.maxColorComponent;
+                    g.baseAlpha = b.a;
+                    Texture bMap = baseMapName != null ? g.m.GetTexture(baseMapName) : null;
+                    if (bMap != null) g.m.SetTexture(baseMapName, GetMaskMap(bMap));
+                }
+
+                shared[i] = g.m;
+                glowMats.Add(g);
+                changed = true;
+            }
+            if (changed) rs[r].sharedMaterials = shared;
+        }
+
+        if (!glowLogged)
+        {
+            glowLogged = true;
+            Debug.Log("[IG88] glow: " + glowMats.Count + " material slot(s) found. Using emission colour '" + emisColorName + "', emission map '" +
+                      (emisMapName ?? "none") + "', base colour '" + (baseColorName ?? "none") + "'. " + DescribeShader(src));
+        }
+        if (glowMats.Count == 0)
+            Debug.LogWarning("IG88Controller: the Droid Glow Material from the GameManager is not used by any renderer of this droid, so its glow can't change.", this);
+    }
+
+    // Brightness mask of a texture: every pixel becomes grey with the value (max of R,G,B) of the original.
+    // A green glow map, a red one or a white one all give the same mask, the tint colour then decides the colour.
+    // Made once and shared by all droids. Works with non-readable textures (goes through the GPU).
+    static Texture GetMaskMap(Texture src)
+    {
+        Texture2D cached;
+        if (maskMapCache.TryGetValue(src, out cached) && cached != null) return cached;
+
+        int w = Mathf.Clamp(src.width, 4, 1024), h = Mathf.Clamp(src.height, 4, 1024);
+        RenderTexture rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+        RenderTexture prev = RenderTexture.active;
+        Graphics.Blit(src, rt);
+        RenderTexture.active = rt;
+        Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false, true);
+        tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+        RenderTexture.active = prev;
+        RenderTexture.ReleaseTemporary(rt);
+
+        Color32[] px = tex.GetPixels32();
+        for (int i = 0; i < px.Length; i++)
+        {
+            byte v = (byte)Mathf.Max(px[i].r, Mathf.Max(px[i].g, px[i].b));
+            px[i].r = v; px[i].g = v; px[i].b = v;
+        }
+        tex.SetPixels32(px);
+        tex.Apply();
+        tex.name = src.name + " (mask)";
+        maskMapCache[src] = tex;
+        return tex;
+    }
+
+    // light stays on at a constant intensity, only the colour changes; the glow material does the same green -> red
+    void UpdateLook(float dt)
+    {
+        float goal = (mode == Mode.Chase) ? 1f : 0f;
+        alertBlend = (dt <= 0f) ? goal : Mathf.MoveTowards(alertBlend, goal, dt / LookFadeTime);
+        Color state = Color.Lerp(gm.DroidGreen, gm.DroidRed, alertBlend);
+
+        if (chaseLight != null)
+        {
+            chaseLight.enabled = true;
+            chaseLight.intensity = gm.DroidLightIntensity;
+            chaseLight.color = state;
+        }
+
+        for (int i = 0; i < glowMats.Count; i++)
+        {
+            GlowMat g = glowMats[i];
+            if (g.m == null) continue;
+            float ei = g.emisIntensity;
+            g.m.SetColor(g.emisColorId, new Color(state.r * ei, state.g * ei, state.b * ei, 1f));
+            if (g.baseColorId >= 0)
+            {
+                float bb = g.baseBrightness;
+                g.m.SetColor(g.baseColorId, new Color(state.r * bb, state.g * bb, state.b * bb, g.baseAlpha));
+            }
+            g.m.EnableKeyword("_EMISSION");   // Unity: the keyword must be enabled AFTER the colour is set
+        }
     }
 
     // ------------------------------------------------------------------ rig detection (unchanged logic)
@@ -220,8 +432,15 @@ public class IG88Controller : MonoBehaviour
         ready = false;
         walking = false;
         aimAtTarget = false;
-        if (chaseLight != null) { chaseLight.intensity = 0f; chaseLight.enabled = false; }
-        if (gm != null) gm.Unregister(this); // a dead droid no longer blocks the living ones
+        if (chaseLight != null) chaseLight.enabled = false;     // a dead droid doesn't glow
+        for (int i = 0; i < glowMats.Count; i++)
+        {
+            GlowMat g = glowMats[i];
+            if (g.m == null) continue;
+            g.m.SetColor(g.emisColorId, Color.black);
+            if (g.baseColorId >= 0) g.m.SetColor(g.baseColorId, new Color(0.08f, 0.08f, 0.08f, g.baseAlpha));
+        }
+        if (gm != null) gm.Unregister(this);                    // a dead droid no longer blocks the living ones
         BreakApart(hitPoint, hitDirection);
         enabled = false; // stops Update/LateUpdate, otherwise the pose reset would snap the bones back
     }
@@ -351,21 +570,46 @@ public class IG88Controller : MonoBehaviour
         float dt = Time.deltaTime;
 
         UpdateMode();
-        walking = gm.DroidPatrolOff ? false : Think(dt); // Droid Patrol Off = stand still, do nothing
 
-        stepsPerSecond = (mode == Mode.Chase) ? gm.RunSteps : gm.PatrolSteps;
-        poseScale = Mathf.MoveTowards(poseScale, mode == Mode.Chase ? runPoseMultiplier : 1f, dt * 3f);
-        UpdateLight(dt);
+        Transform p = gm.Player;
+        if (p != null) aimPoint = gm.PlayerAimPoint;
+
+        if (gm.DroidPatrolOff)
+        {
+            walking = false;                    // Droid Patrol Off = stand still, do nothing
+        }
+        else
+        {
+            walking = Think(dt);
+            UpdateFiring();
+        }
+
+        stepsPerSecond = gm.WalkSteps;
+        UpdateLook(dt);
     }
 
     void UpdateMode()
     {
         Transform p = gm.Player;
-        // Droid Off or Droid Patrol Off: never chase / target the player
-        bool canChase = !gm.DroidOff && !gm.DroidPatrolOff;
-        bool inRange = canChase && p != null && Vector3.Distance(transform.position, p.position) < gm.ChaseRadius;
 
-        if (inRange && mode == Mode.Patrol)
+        // Droid Off or Droid Patrol Off: never chase / target / shoot the player
+        bool canChase = !gm.DroidOff && !gm.DroidPatrolOff && p != null;
+
+        // DETECTION (is the droid aware of the player right now?)
+        //  - close quarters: inside the Detection Radius it senses the player, no sight needed
+        //  - distance: up to the Sight Range it detects the player as soon as it can SEE him (no wall in between)
+        // 'seesPlayer' is worked out once per frame and is ALSO what the shooting uses, so the droid fires exactly when it sees you.
+        seesPlayer = false;
+        bool aware = false;
+        if (canChase)
+        {
+            float d = Vector3.Distance(transform.position, p.position);
+            seesPlayer = d < gm.SightRange && CanSeePlayer(p);
+            aware = seesPlayer || d < gm.DetectionRadius;
+        }
+        if (aware) lastAwareTime = Time.time;
+
+        if (mode == Mode.Patrol && aware)
         {
             mode = Mode.Chase;
             returning = false;
@@ -373,15 +617,29 @@ public class IG88Controller : MonoBehaviour
             blockedTime = 0f;
             backoffTimer = 0f;
             aimAtTarget = true;
+            lastAwareTime = Time.time;
+            nextFireTime = Time.time;   // no delay: the first shot is allowed right away (the gun only has to swing onto the player)
         }
-        else if (!inRange && mode == Mode.Chase)
+        else if (mode == Mode.Chase && (!canChase || Time.time > lastAwareTime + gm.LoseSightTime))
         {
+            // player gone (or droids switched off) / not seen or sensed for 'Lose Sight Time' seconds: back to patrol
             mode = Mode.Patrol;
             aimAtTarget = false;
             BeginReturnToPatrol();
         }
 
         if (mode == Mode.Chase && p != null) target = p; // target = object tagged Player, found automatically
+    }
+
+    /// <summary>
+    /// True if there is a clear line of sight from the droid's head to the centre of the player
+    /// (walls and other solid objects block it, other droids don't). Same test the droid uses to decide it can shoot.
+    /// </summary>
+    bool CanSeePlayer(Transform p)
+    {
+        if (p == null) return false;
+        Vector3 eye = (rigReady && head != null) ? head.t.position : transform.position + transform.up * 1.5f;
+        return gm.HasClearShot(eye, gm.PlayerAimPoint);
     }
 
     bool Matches(IG88EdgeKind kind)
@@ -399,6 +657,11 @@ public class IG88Controller : MonoBehaviour
             goalNode = NearestRouteNode();
             if (goalNode < 0) returning = false;
         }
+        else if (toNode >= 0 && gm.IsNoPatrolNode(toNode))
+        {
+            // chase ended while walking along my own route toward G1 / R1: turn around instead of walking on to it
+            Reverse();
+        }
     }
 
     // nearest node that belongs to my patrol route, measured along the connections
@@ -411,6 +674,7 @@ public class IG88Controller : MonoBehaviour
         for (int i = 0; i < nodes.Length; i++)
         {
             int n = nodes[i];
+            if (gm.IsNoPatrolNode(n)) continue;   // never "return to patrol" onto G1 / R1
             float cost;
             if (toNode >= 0)
             {
@@ -451,14 +715,37 @@ public class IG88Controller : MonoBehaviour
             return gm.NextHop(fromNode, goalNode);
         }
 
-        // patrol: random walk over the connections of MY route only, no turning back unless dead end
+        // patrol: random walk over the connections of MY route only
         tmp.Clear();
         List<IG88Link> links = gm.Links(fromNode);
         for (int i = 0; i < links.Count; i++)
-            if (Matches(links[i].kind)) tmp.Add(links[i].node);
+            if (Matches(links[i].kind) && !gm.IsNoPatrolNode(links[i].node)) tmp.Add(links[i].node);   // G1 / R1: chase only
         if (tmp.Count == 0) return -1;
-        if (tmp.Count > 1) tmp.Remove(prevNode);
-        return tmp[Random.Range(0, tmp.Count)];
+
+        // 1) stay in my own patrol zone (a few waypoints around my home). Outside of it (e.g. after a chase) head back toward home.
+        tmp2.Clear();
+        for (int i = 0; i < tmp.Count; i++)
+            if (homeHops[tmp[i]] <= gm.PatrolZoneSize) tmp2.Add(tmp[i]);
+        if (tmp2.Count == 0)
+        {
+            int bestHops = int.MaxValue;
+            for (int i = 0; i < tmp.Count; i++) bestHops = Mathf.Min(bestHops, homeHops[tmp[i]]);
+            for (int i = 0; i < tmp.Count; i++)
+                if (homeHops[tmp[i]] == bestHops) tmp2.Add(tmp[i]);
+        }
+
+        // 2) don't walk into a waypoint where another droid stands or waits, if there is another way
+        if (tmp2.Count > 1)
+        {
+            tmp.Clear();
+            for (int i = 0; i < tmp2.Count; i++)
+                if (!gm.NodeCrowded(tmp2[i], this)) tmp.Add(tmp2[i]);
+            if (tmp.Count > 0) { tmp2.Clear(); tmp2.AddRange(tmp); }
+        }
+
+        // 3) no turning back unless it's a dead end
+        if (tmp2.Count > 1) tmp2.Remove(prevNode);
+        return tmp2[Random.Range(0, tmp2.Count)];
     }
 
     void Reverse()
@@ -480,6 +767,14 @@ public class IG88Controller : MonoBehaviour
         return Mathf.Abs(ang - step) < 4f;
     }
 
+    // not walking: while chasing, keep facing the player
+    bool Idle(float dt)
+    {
+        Transform p = gm.Player;
+        if (mode == Mode.Chase && p != null) FaceDirection(p.position - transform.position, dt);
+        return false;
+    }
+
     /// <summary>Returns true when the droid actually moved this frame (drives the walk animation).</summary>
     bool Think(float dt)
     {
@@ -488,22 +783,29 @@ public class IG88Controller : MonoBehaviour
 
         if (mode == Mode.Chase) UpdateChaseGoal(player);
 
+        if (mode == Mode.Chase && player != null)
+        {
+            Vector3 toPlayer = player.position - transform.position;
+
+            // no stopping on detection: the droid walks toward the player right away (and shoots while walking).
+            // 1 m from the player: stop and keep facing him
+            if (Vector3.ProjectOnPlane(toPlayer, transform.up).magnitude <= CloseDistance)
+            {
+                FaceDirection(toPlayer, dt);
+                return false;
+            }
+        }
+
         // standing on a node -> decide where to go
         if (toNode < 0)
         {
-            if (backoffTimer > 0f) return false;
+            if (backoffTimer > 0f) return Idle(dt);
             if (returning && fromNode == goalNode) returning = false;
             toNode = ChooseNext();
-            if (toNode < 0) return false;
+            if (toNode < 0) return Idle(dt);
         }
 
         Vector3 pos = transform.position;
-
-        // chase: droids are ranged, not melee. Once inside firing distance, hold position (aim stays on the player).
-        // If the player backs away beyond the firing distance, the droid moves toward him again.
-        if (mode == Mode.Chase && player != null && gm.FiringDistance > 0f &&
-            Vector3.Distance(pos, player.position) <= gm.FiringDistance)
-            return false;
 
         // chase / returning: if the goal is now behind us, turn around in the middle of the connection
         if ((mode == Mode.Chase || returning) && goalNode >= 0 && backoffTimer <= 0f)
@@ -520,8 +822,7 @@ public class IG88Controller : MonoBehaviour
         // robotic: first turn on the spot, then walk in a straight line
         if (dist > 0.0001f && !FaceDirection(dir / dist, dt)) return false;
 
-        float speed = (mode == Mode.Chase) ? gm.RunSpeed : gm.PatrolSpeed;
-        float step = speed * dt;
+        float step = gm.WalkSpeed * dt;   // same walk speed for patrol and chase
         bool arrives = dist <= step;
         Vector3 newPos = arrives ? tp : pos + dir / dist * step;
 
@@ -536,7 +837,7 @@ public class IG88Controller : MonoBehaviour
                 blockLimit = Random.Range(2f, 4f);
                 Reverse();
             }
-            return false;
+            return Idle(dt);
         }
         blockedTime = 0f;
 
@@ -550,12 +851,41 @@ public class IG88Controller : MonoBehaviour
         return true;
     }
 
-    void UpdateLight(float dt)
+    // ------------------------------------------------------------------ shooting (same idea as the player's blaster, red)
+
+    void UpdateFiring()
     {
-        if (chaseLight == null) return;
-        float goal = (mode == Mode.Chase) ? gm.ChaseLightIntensity : 0f;
-        float rate = Mathf.Max(gm.ChaseLightIntensity, 0.0001f) / Mathf.Max(lightFadeTime, 0.01f);
-        chaseLight.intensity = Mathf.MoveTowards(chaseLight.intensity, goal, rate * dt);
+        if (mode != Mode.Chase || !gm.PlayerAlive) return;
+        Transform p = gm.Player;
+        if (p == null || Time.time < nextFireTime) return;
+
+        // SIGHT is the only distance / visibility rule: the droid shoots while it sees the player (within the Sight Range),
+        // from the very first frame it detects him. No sight (e.g. it only senses him through a wall) = no shooting.
+        if (!seesPlayer) return;
+
+        Vector3 origin = gunTip.t.position;
+        Vector3 want = aimPoint - origin;
+        if (want.sqrMagnitude < 0.01f) return;
+
+        // only when the gun really points at the player (the arm has a limited turn range)
+        Vector3 gunDir = gun.t.TransformDirection(gunFwdLocal);
+        if (Vector3.Angle(gunDir, want) > maxFireAngle) return;
+
+        // and the bolt itself must have a free path: checked from the gun tip (where the bolt starts) to the player, so it never
+        // shoots into a wall even if the head sees past a corner. Done BEFORE the cooldown is set, so it fires the moment the way is free.
+        if (!gm.HasClearShot(origin, aimPoint)) return;
+
+        nextFireTime = Time.time + 1f / Mathf.Max(0.1f, gm.DroidFireRate);
+
+        // aim at the player, then add the random spread (Droid Accuracy in the GameManager)
+        Vector3 dir = want.normalized;
+        float spread = gm.DroidSpreadDegrees;
+        if (spread > 0f)
+        {
+            Vector2 s = Random.insideUnitCircle * spread;
+            dir = Quaternion.LookRotation(dir) * Quaternion.Euler(-s.y, s.x, 0f) * Vector3.forward;
+        }
+        gm.FireDroidBolt(origin, dir);
     }
 
     // ------------------------------------------------------------------ procedural animation
@@ -594,11 +924,11 @@ public class IG88Controller : MonoBehaviour
 
     void Leg(RigBone thigh, RigBone shin, RigBone foot, float s, float c, float w)
     {
-        float t = thighSwing * poseScale * s * w;
-        float knee = kneeBend * poseScale * Mathf.Max(0f, c) * w;
+        float t = thighSwing * s * w;                 // + = leg swings forward
+        float knee = kneeBend * Mathf.Max(0f, c) * w; // knee bends while the leg moves forward
         Swing(thigh, t);
         Swing(shin, -knee);
-        Swing(foot, (knee - t) * 0.8f);
+        Swing(foot, (knee - t) * 0.8f);               // keep the foot roughly level
     }
 
     void ApplyWalk(float w)
@@ -607,8 +937,8 @@ public class IG88Controller : MonoBehaviour
         float sR = Mathf.Sin(phase + Mathf.PI), cR = Mathf.Cos(phase + Mathf.PI);
         Leg(thighL, shinL, footL, sL, cL, w);
         Leg(thighR, shinR, footR, sR, cR, w);
-        Swing(armL, -armSwing * poseScale * sL * w);
-        Swing(armR, armSwing * 0.25f * poseScale * sL * w);
+        Swing(armL, -armSwing * sL * w);
+        Swing(armR, armSwing * 0.25f * sL * w);       // gun arm only sways a little
         Twist(waist, torsoTwist * sL * w);
         float bob = bodyBob * Mathf.Cos(2f * phase) * w;
         Transform p = pelvis.t.parent;
@@ -620,7 +950,7 @@ public class IG88Controller : MonoBehaviour
     {
         Vector3 up = transform.up;
         Vector3 fwd = Vector3.ProjectOnPlane(transform.TransformDirection(restForwardLocal), up);
-        Vector3 tp = target.position;
+        Vector3 tp = aimPoint; // centre of the player
 
         // 1) upper body turns (waist + chest) around the vertical axis
         Vector3 flat = Vector3.ProjectOnPlane(tp - chest.t.position, up);
@@ -662,7 +992,7 @@ public class IG88Controller : MonoBehaviour
     {
         if (!drawGizmos || !rigReady || target == null || gunTip == null) return;
         Gizmos.color = aimAtTarget ? Color.red : Color.gray;
-        Gizmos.DrawLine(gunTip.t.position, target.position);
+        Gizmos.DrawLine(gunTip.t.position, aimPoint);
     }
 
     // Handy for your own scripts / UI buttons:

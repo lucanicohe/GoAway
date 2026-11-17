@@ -9684,11 +9684,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 5354553250982389254, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_AnchoredPosition.x
-      value: 396.7
+      value: 396.69995
       objectReference: {fileID: 0}
     - target: {fileID: 5354553250982389254, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_AnchoredPosition.y
-      value: 52.3
+      value: 52.30005
       objectReference: {fileID: 0}
     - target: {fileID: 5394132787194034455, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_Color.a
@@ -21799,6 +21799,8 @@ MonoBehaviour:
   maxAmmo: 120
   currentAmmo: 120
   infiniteAmmo: 0
+  playerMaxHealth: 120
+  playerHealth: 120
   blaster: {fileID: 60795184}
   visorHud: {fileID: 1297054607}
   sway: {fileID: 7427346025848275315}
@@ -21808,16 +21810,25 @@ MonoBehaviour:
   droidOff: 0
   droidPatrolOff: 0
   ig88Prefab: {fileID: 3551385826954921734, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-  droidCount: 4
-  chaseRadius: 12
-  firingDistance: 6
-  chaseLightIntensity: 0.3
-  patrolSpeed: 1
-  runSpeed: 3.5
-  patrolStepsPerSecond: 0.5
-  runStepsPerSecond: 1
+  droidCount: 7
+  droidHealth: 6
+  damagePerPlayerHit: 1
+  detectionRadius: 16
+  sightRange: 40
+  loseSightTime: 10
+  droidDamage: 6
+  droidFireRate: 1.5
+  droidAccuracy: 0.85
+  droidBoltSpeed: 40
+  walkSpeed: 1
+  walkStepsPerSecond: 1.1
   turnSpeed: 240
-  minDroidDistance: 1.5
+  droidLightIntensity: 0.1
+  droidGreen: {r: 0.25, g: 1, b: 0.35, a: 1}
+  droidRed: {r: 1, g: 0.15, b: 0.15, a: 1}
+  droidGlowMaterial: {fileID: 2100000, guid: b49a3f2433d3d4c6fab4dbede89b7049, type: 2}
+  patrolZoneSize: 2
+  minDroidDistance: 6
   g1: {fileID: 622711537}
   g2: {fileID: 1201757883}
   g3: {fileID: 836205005}
@@ -28451,92 +28462,6 @@ PrefabInstance:
       addedObject: {fileID: 1904577190}
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 0e6942d68e2a24be7b177559c395581c, type: 3}
---- !u!1001 &6343024087402930084
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 0}
-    m_Modifications:
-    - target: {fileID: 551131286658805567, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_Name
-      value: IG88
-      objectReference: {fileID: 0}
-    - target: {fileID: 551131286658805567, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_IsActive
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 591547447150034453, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_IsActive
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 3551385826954921734, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: target
-      value: 
-      objectReference: {fileID: 7427346025848275314}
-    - target: {fileID: 3551385826954921734, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: armSwing
-      value: 14.3
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalPosition.x
-      value: -11.765
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: -0.091
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: -21.9
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalRotation.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalRotation.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalRotation.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3602135490807995692, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 8343720114480395592, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_IsActive
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 8706327220851507818, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 0.041
-      objectReference: {fileID: 0}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects: []
-    m_AddedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: 1b9281692898a4859acc1004f6200e59, type: 3}
---- !u!4 &7427346025848275314 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 1501148038856803718, guid: 0e6942d68e2a24be7b177559c395581c, type: 3}
-  m_PrefabInstance: {fileID: 3765203256237065266}
-  m_PrefabAsset: {fileID: 0}
 --- !u!114 &7427346025848275315 stripped
 MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 9199086688999221967, guid: 0e6942d68e2a24be7b177559c395581c, type: 3}
@@ -28561,7 +28486,6 @@ SceneRoots:
   - {fileID: 779547800}
   - {fileID: 844080664}
   - {fileID: 1284379053}
-  - {fileID: 6343024087402930084}
   - {fileID: 1599241399}
   - {fileID: 1429901936}
   - {fileID: 3765203256237065266}

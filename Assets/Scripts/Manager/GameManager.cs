@@ -1,18 +1,24 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Serialization;
 using TMPro;
 
 [DefaultExecutionOrder(-50)] // runs before most player scripts
 public class GameManager : MonoBehaviour
 {
-    // One droid per waypoint is the physical maximum (11 waypoints, no two droids may share a spot).
-    public const int MaxDroids = 11;
+    // One droid per usable waypoint is the physical maximum. There are 11 waypoints, but G1 and R1 are too close
+    // to the player's start and are never used as spawn / patrol points, so 9 are left.
+    public const int MaxDroids = 9;
 
     [Header("Ammo")]
     [SerializeField] private int maxAmmo = 30;
     [SerializeField] private int currentAmmo = 30;          // live counter in Inspector
     [SerializeField] private bool infiniteAmmo = false;
+
+    [Header("Player Health (shown on the Visor HUD health bar)")]
+    [SerializeField] private float playerMaxHealth = 120f;
+    [SerializeField] private float playerHealth = 120f;     // live counter in Inspector
 
     [Header("References (auto-finds if empty)")]
     [SerializeField] private BlasterWeapon blaster;
@@ -33,43 +39,76 @@ public class GameManager : MonoBehaviour
     // =====================================================================
 
     [Header("IG-88 Master Switches (work live while playing)")]
-    [Tooltip("Droids will NOT chase or target the player. They keep patrolling normally.")]
+    [Tooltip("Droids will NOT chase, target or shoot the player. They keep patrolling normally.")]
     [SerializeField] private bool droidOff = false;
-    [Tooltip("Droids stand completely still and do nothing (no patrol, no chase, no aiming, light off). Overrides Droid Off.")]
+    [Tooltip("Droids stand completely still and do nothing (no patrol, no chase, no aiming, no shooting). Overrides Droid Off.")]
     [SerializeField] private bool droidPatrolOff = false;
 
     [Header("IG-88 Spawning")]
     [Tooltip("Drag your IG88 prefab here (it must have the IG88Controller on its root).")]
     [SerializeField] private IG88Controller ig88Prefab;
-    [Tooltip("How many droids to spawn. Max = 11 (one per waypoint). They alternate: green patrol, red patrol, green, red ...")]
+    [Tooltip("How many droids to spawn. Max = 9 (one per usable waypoint; G1 and R1 are never used as spawn points). They alternate: green patrol, red patrol, green, red ...")]
     [Range(0, MaxDroids)]
     [SerializeField] private int droidCount = 4;
-    [Tooltip("Health of every droid, applied when it spawns. It is reduced by the 'Damage' of your BlasterWeapon (25 by default). " +
-             "1 = any hit kills (1 shot). 100 = 4 shots with the default damage. At 0 the droid breaks apart.")]
+
+    [Header("IG-88 Health")]
+    [Tooltip("Health of every droid, applied when it spawns. Every hit of the player's blaster takes 'Damage Per Player Hit' away, " +
+             "so with the default of 1: health 1 = 1 shot, health 2 = 2 shots, health 3 = 3 shots ...")]
     [Min(0.01f)]
     [SerializeField] private float droidHealth = 1f;
+    [Tooltip("How much health one hit of the player's blaster removes from a droid. 1 = Droid Health counts shots.")]
+    [Min(0.01f)]
+    [SerializeField] private float damagePerPlayerHit = 1f;
 
     [Header("IG-88 Detection / Chase")]
-    [Tooltip("A droid starts chasing when the Player (tag 'Player') is closer than this. It stops when the player is farther away.")]
-    [SerializeField] private float chaseRadius = 12f;
-    [Tooltip("Firing distance: while chasing, a droid walks toward the player only until it is this close, then holds position and fires. " +
-             "Keep it smaller than Chase Radius. If the player moves farther away, the droid moves closer again. 0 = walk all the way to the player.")]
+    [Tooltip("Detection radius = CLOSE QUARTERS only. Inside this distance a droid detects the Player (tag 'Player') even without " +
+             "seeing him (it senses him through walls, from behind ...). Keep it small, e.g. 4-6 m. Farther away it needs SIGHT (see Sight Range).")]
+    [FormerlySerializedAs("chaseRadius")]   // keeps the value you already set in the Inspector
     [Min(0f)]
-    [SerializeField] private float firingDistance = 6f;
-    [Tooltip("Point light inside each droid goes from 0 to this value while chasing.")]
-    [SerializeField] private float chaseLightIntensity = 0.3f;
+    [SerializeField] private float detectionRadius = 5f;
+    [Tooltip("SIGHT: a droid detects the Player the moment it can SEE him (clear line of sight, no wall in between) closer than this, " +
+             "and it shoots him as long as it sees him. This is also how far droids shoot. Must be larger than the Detection Radius to make a difference.")]
+    [Min(0f)]
+    [SerializeField] private float sightRange = 40f;
+    [Tooltip("Seconds a chasing droid keeps chasing after it last saw / sensed the player. Then it gives up and goes back to its patrol. " +
+             "While the timer runs it still walks toward him around corners.")]
+    [Min(0f)]
+    [SerializeField] private float loseSightTime = 10f;
+
+    [Header("IG-88 Weapon (droids shoot as soon as they see the player, up to the Sight Range)")]
+    [Tooltip("Health the player loses per droid bolt that hits him.")]
+    [SerializeField] private float droidDamage = 6f;
+    [Tooltip("Shots per second.")]
+    [Min(0.1f)]
+    [SerializeField] private float droidFireRate = 1.5f;
+    [Tooltip("Droid aim. 1 = perfect, lower = more bolts miss. 0 = up to 15 degrees off.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float droidAccuracy = 0.85f;
+    [Tooltip("Metres per second (the player's blaster is 90).")]
+    [SerializeField] private float droidBoltSpeed = 40f;
 
     [Header("IG-88 Speed")]
-    [Tooltip("Metres per second while patrolling.")]
-    [SerializeField] private float patrolSpeed = 1.0f;
-    [Tooltip("Metres per second while chasing.")]
-    [SerializeField] private float runSpeed = 3.5f;
-    [Tooltip("Walk animation speed (full step cycles per second) while patrolling.")]
-    [SerializeField] private float patrolStepsPerSecond = 1.1f;
-    [Tooltip("Walk animation speed (full step cycles per second) while chasing.")]
-    [SerializeField] private float runStepsPerSecond = 2.2f;
-    [Tooltip("Degrees per second the droid turns on the spot at corners (robotic turning).")]
+    [Tooltip("Metres per second. Used for patrolling AND chasing.")]
+    [SerializeField] private float walkSpeed = 1.0f;
+    [Tooltip("Walk animation speed (full step cycles per second).")]
+    [SerializeField] private float walkStepsPerSecond = 1.1f;
+    [Tooltip("Degrees per second the droid turns on the spot (robotic turning).")]
     [SerializeField] private float turnSpeed = 240f;
+
+    [Header("IG-88 Light + Glow (green = calm, red = chase)")]
+    [Tooltip("The droid's point light stays on at this intensity all the time, only its colour changes.")]
+    [SerializeField] private float droidLightIntensity = 0.1f;
+    [SerializeField] private Color droidGreen = new Color(0.25f, 1f, 0.35f, 1f);
+    [SerializeField] private Color droidRed = new Color(1f, 0.15f, 0.15f, 1f);
+    [Tooltip("Drag the droid's glow material here (the one with the green emission). Each droid gets its own copy, " +
+             "its emission goes green -> red on chase, the original asset is not changed.")]
+    [SerializeField] private Material droidGlowMaterial;
+
+    [Header("IG-88 Patrol")]
+    [Tooltip("Every droid patrols around the waypoint it spawned on. It only walks to waypoints at most this many connections away from its home. " +
+             "1 = very small zone, 2 = natural, 4+ = roams almost the whole route.")]
+    [Range(1, 6)]
+    [SerializeField] private int patrolZoneSize = 2;
 
     [Header("IG-88 Collision")]
     [Tooltip("Droids never get closer than this to each other. A droid that would break this waits until the other one moves.")]
@@ -128,6 +167,18 @@ public class GameManager : MonoBehaviour
     static readonly int[] GreenNodes = { G1, G2, G3, G4, G5, G6 };
     static readonly int[] RedNodes = { R1, R2, R3, R4, R5, G3 };
 
+    // G1 and R1 are too close to the player's start: no droid spawns on them and no droid patrols to them.
+    // Droids can still walk to / through them while CHASING the player (and when returning to their patrol).
+    static readonly int[] NoPatrolNodes = { G1, R1 };
+
+    /// <summary>True for waypoints where droids may not spawn or patrol (they are chase-only).</summary>
+    public bool IsNoPatrolNode(int node)
+    {
+        for (int i = 0; i < NoPatrolNodes.Length; i++)
+            if (NoPatrolNodes[i] == node) return true;
+        return false;
+    }
+
     Transform[] nodes;
     List<IG88Link>[] links;
     float[,] dist;
@@ -138,20 +189,42 @@ public class GameManager : MonoBehaviour
     readonly List<IG88Controller> droids = new List<IG88Controller>();
     Transform player;
     float nextPlayerSearch;
+    Collider playerCollider;
+    Transform playerColliderOwner;
+    bool playerWasAlive = true;
+
+    // ----- droid bolt pools (built once in Start, nothing is instantiated while shooting) -----
+    Transform droidBoltRoot, droidSparkRoot;
+    readonly List<IG88Bolt> droidBolts = new List<IG88Bolt>();
+    readonly List<BlasterHitSparks> droidSparks = new List<BlasterHitSparks>();
+    int nextDroidBolt, nextDroidSpark;
+    Material boltCoreMat, boltGlowMat, boltGlowOuterMat, sparkRedMat, sparkWhiteMat, flashRedMat;
+    const int DroidBoltPoolSize = 32;
+    const int DroidSparkPoolSize = 12;
+    const float DroidBoltRange = 200f;
+    const float DroidBoltRadius = 0.03f;   // sphere-cast radius of a droid bolt (also used for the line-of-sight check)
+    const float MaxSpreadDegrees = 15f;
+    readonly RaycastHit[] losHits = new RaycastHit[32];
 
     // ---------- public read-only values used by the droids ----------
     public float DroidHealth => droidHealth;
     public bool DroidOff => droidOff;
     public bool DroidPatrolOff => droidPatrolOff;
-    public float ChaseRadius => chaseRadius;
-    public float FiringDistance => firingDistance;
-    public float ChaseLightIntensity => chaseLightIntensity;
-    public float PatrolSpeed => patrolSpeed;
-    public float RunSpeed => runSpeed;
-    public float PatrolSteps => patrolStepsPerSecond;
-    public float RunSteps => runStepsPerSecond;
+    public float DetectionRadius => detectionRadius;
+    public float SightRange => sightRange;
+    public float LoseSightTime => loseSightTime;
+    public float DroidDamage => droidDamage;
+    public float DroidFireRate => droidFireRate;
+    public float DroidSpreadDegrees => (1f - Mathf.Clamp01(droidAccuracy)) * MaxSpreadDegrees;
+    public float WalkSpeed => walkSpeed;
+    public float WalkSteps => walkStepsPerSecond;
     public float TurnSpeed => turnSpeed;
+    public float DroidLightIntensity => droidLightIntensity;
+    public Color DroidGreen => droidGreen;
+    public Color DroidRed => droidRed;
+    public Material DroidGlowMaterial => droidGlowMaterial;
     public float MinDroidDistance => minDroidDistance;
+    public int PatrolZoneSize => patrolZoneSize;
 
     /// <summary>The object tagged "Player" (found automatically).</summary>
     public Transform Player
@@ -168,7 +241,30 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    /// <summary>Where droids aim: the centre of the player's collider (falls back to 1.2 m above his pivot).</summary>
+    public Vector3 PlayerAimPoint
+    {
+        get
+        {
+            Transform p = Player;
+            if (p == null) return Vector3.zero;
+            if (playerColliderOwner != p)
+            {
+                playerColliderOwner = p;
+                playerCollider = p.GetComponentInChildren<Collider>();
+                if (playerCollider == null) playerCollider = p.GetComponentInParent<Collider>();
+            }
+            return playerCollider != null ? playerCollider.bounds.center : p.position + Vector3.up * 1.2f;
+        }
+    }
+
     private bool blasterWasEnabled;
+
+    // an old scene may still have 10 or 11 saved: clamp it to the new maximum
+    private void OnValidate()
+    {
+        droidCount = Mathf.Clamp(droidCount, 0, MaxDroids);
+    }
 
     private void Awake()
     {
@@ -190,12 +286,17 @@ public class GameManager : MonoBehaviour
         currentAmmo = Mathf.Clamp(currentAmmo, 0, maxAmmo);
         UpdateAmmoUI();
 
+        playerMaxHealth = Mathf.Max(1f, playerMaxHealth);
+        playerHealth = Mathf.Clamp(playerHealth, 0f, playerMaxHealth);
+        UpdateHealthUI();
+
         if (blaster != null)
         {
             blaster.Fired += OnWeaponFired;
             blasterWasEnabled = blaster.enabled;
         }
 
+        BuildDroidPools();
         SpawnDroids();
     }
 
@@ -210,18 +311,21 @@ public class GameManager : MonoBehaviour
     }
 
     // Every blaster hit in the scene: if the thing that was hit belongs to a droid, damage that droid.
+    // Every hit counts as 'Damage Per Player Hit' (default 1), so Droid Health = number of shots.
     private void OnBlasterHit(BlasterHitInfo info)
     {
         if (info.collider == null) return;
         IG88Controller droid = info.collider.GetComponentInParent<IG88Controller>();
         if (droid != null)
-            droid.TakeDamage(info.damage, info.point, info.direction);
+            droid.TakeDamage(damagePerPlayerHit, info.point, info.direction);
     }
 
     private void OnDestroy()
     {
         if (blaster != null)
             blaster.Fired -= OnWeaponFired;
+        if (droidBoltRoot != null) Destroy(droidBoltRoot.gameObject);
+        if (droidSparkRoot != null) Destroy(droidSparkRoot.gameObject);
     }
 
     private void Update()
@@ -269,6 +373,16 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    private void UpdateHealthUI()
+    {
+        // Visor HUD (0-1), same way as the ammo bar
+        if (visorHud != null)
+        {
+            float normalized = playerMaxHealth > 0f ? playerHealth / playerMaxHealth : 0f;
+            visorHud.SetHealth(normalized);
+        }
+    }
+
     // ---------- Public helpers you can call from other scripts ----------
 
     public void AddAmmo(int amount)
@@ -286,6 +400,36 @@ public class GameManager : MonoBehaviour
     public int CurrentAmmo => currentAmmo;
     public int MaxAmmo => maxAmmo;
     public bool HasAmmo => infiniteAmmo || currentAmmo > 0;
+
+    public float PlayerHealth => playerHealth;
+    public float PlayerMaxHealth => playerMaxHealth;
+    public bool PlayerAlive => playerHealth > 0f;
+
+    public void DamagePlayer(float amount)
+    {
+        if (playerHealth <= 0f) return;
+        playerHealth = Mathf.Clamp(playerHealth - amount, 0f, playerMaxHealth);
+        UpdateHealthUI();
+        if (playerHealth <= 0f && playerWasAlive)
+        {
+            playerWasAlive = false;
+            Debug.Log("Player is dead!");
+        }
+    }
+
+    public void HealPlayer(float amount)
+    {
+        playerHealth = Mathf.Clamp(playerHealth + amount, 0f, playerMaxHealth);
+        if (playerHealth > 0f) playerWasAlive = true;
+        UpdateHealthUI();
+    }
+
+    public void SetPlayerHealth(float amount)
+    {
+        playerHealth = Mathf.Clamp(amount, 0f, playerMaxHealth);
+        if (playerHealth > 0f) playerWasAlive = true;
+        UpdateHealthUI();
+    }
 
     // ---------- Soft conflict fix (no rewrite of the two scripts) ----------
 
@@ -447,19 +591,69 @@ public class GameManager : MonoBehaviour
         droids.Clear();
     }
 
+    // picks the free waypoint that is farthest from the droids already placed, so droids start spread out
+    // (G1 and R1 are never picked: too close to the player's start)
     private int PickFreeNode(IG88Route route)
     {
         int[] list = RouteNodes(route);
-        List<int> free = new List<int>();
+        int best = -1;
+        float bestScore = -1f;
         for (int i = 0; i < list.Length; i++)
         {
+            if (IsNoPatrolNode(list[i])) continue;
             Vector3 p = NodePos(list[i]);
+            float nearest = float.MaxValue;
             bool taken = false;
             for (int d = 0; d < droids.Count; d++)
-                if (droids[d] != null && Vector3.Distance(droids[d].transform.position, p) < minDroidDistance) { taken = true; break; }
-            if (!taken) free.Add(list[i]);
+            {
+                if (droids[d] == null) continue;
+                float dd = Vector3.Distance(droids[d].transform.position, p);
+                if (dd < minDroidDistance) { taken = true; break; }
+                nearest = Mathf.Min(nearest, dd);
+            }
+            if (taken) continue;
+
+            // farthest from everybody wins, a little randomness so it isn't identical every start
+            float score = (nearest == float.MaxValue ? 0f : nearest) + Random.value * 0.5f;
+            if (score > bestScore) { bestScore = score; best = list[i]; }
         }
-        return free.Count == 0 ? -1 : free[Random.Range(0, free.Count)];
+        return best;
+    }
+
+    /// <summary>Number of connections from 'start' to every waypoint, walking only along the connections of one patrol route.</summary>
+    public int[] RouteHops(IG88Route r, int start)
+    {
+        int[] hops = new int[nodes.Length];
+        for (int i = 0; i < hops.Length; i++) hops[i] = 999;
+        Queue<int> q = new Queue<int>();
+        hops[start] = 0;
+        q.Enqueue(start);
+        while (q.Count > 0)
+        {
+            int n = q.Dequeue();
+            List<IG88Link> ls = links[n];
+            for (int i = 0; i < ls.Count; i++)
+            {
+                bool ok = r == IG88Route.Green ? ls[i].kind == IG88EdgeKind.Green : ls[i].kind == IG88EdgeKind.Red;
+                if (!ok || hops[ls[i].node] != 999) continue;
+                hops[ls[i].node] = hops[n] + 1;
+                q.Enqueue(ls[i].node);
+            }
+        }
+        return hops;
+    }
+
+    /// <summary>True if another droid is standing close to that waypoint.</summary>
+    public bool NodeCrowded(int node, IG88Controller who)
+    {
+        Vector3 p = NodePos(node);
+        for (int i = 0; i < droids.Count; i++)
+        {
+            IG88Controller o = droids[i];
+            if (o == null || o == who) continue;
+            if (Vector3.Distance(o.transform.position, p) < minDroidDistance * 2.5f) return true;
+        }
+        return false;
     }
 
     public void Unregister(IG88Controller d) { droids.Remove(d); }
@@ -481,6 +675,173 @@ public class GameManager : MonoBehaviour
             if (after < minDroidDistance && after < now - 0.0001f) return true;
         }
         return false;
+    }
+
+    // =====================================================================
+    //  IG-88: droid blaster (same mechanic as the player's blaster, but red)
+    // =====================================================================
+
+    private void BuildDroidPools()
+    {
+        EnsureDroidMaterials();
+
+        droidBoltRoot = new GameObject("IG88 Bolts").transform;
+        droidSparkRoot = new GameObject("IG88 Sparks").transform;
+
+        for (int i = 0; i < DroidBoltPoolSize; i++)
+            droidBolts.Add(CreateDroidBolt(i));
+
+        for (int i = 0; i < DroidSparkPoolSize; i++)
+        {
+            GameObject g = new GameObject("Spark Burst " + i);
+            g.transform.SetParent(droidSparkRoot, false);
+            BlasterHitSparks s = g.AddComponent<BlasterHitSparks>();
+            // same settings as the player's sparks, red materials / red light
+            s.Build(16, sparkRedMat, sparkWhiteMat, flashRedMat,
+                    0.012f, 0.14f, 0.22f,
+                    2.5f, 9f, 0.22f, 0.55f, 9.81f,
+                    true, droidRed, 3f, 3.5f);
+            droidSparks.Add(s);
+        }
+    }
+
+    private IG88Bolt CreateDroidBolt(int index)
+    {
+        const float length = 0.7f, radius = 0.028f;
+
+        GameObject root = new GameObject("Droid Bolt " + index);
+        root.transform.SetParent(droidBoltRoot, false);
+        IG88Bolt bolt = root.AddComponent<IG88Bolt>();
+        bolt.Setup(this, DroidBoltRadius);
+
+        MakeBoltCapsule("Core", root.transform, radius, length, boltCoreMat);
+        MakeBoltCapsule("Glow", root.transform, radius * 2.2f, length * 1.15f, boltGlowMat);
+        MakeBoltCapsule("Glow Outer", root.transform, radius * 3.6f, length * 1.4f, boltGlowOuterMat);
+
+        Light l = root.AddComponent<Light>();
+        l.type = LightType.Point;
+        l.color = droidRed;
+        l.intensity = 2f;
+        l.range = 5f;
+        l.shadows = LightShadows.None;
+
+        root.SetActive(false);
+        return bolt;
+    }
+
+    private void MakeBoltCapsule(string objectName, Transform parent, float radius, float length, Material material)
+    {
+        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        go.name = objectName;
+        Collider c = go.GetComponent<Collider>();
+        if (c != null) Destroy(c);
+        go.transform.SetParent(parent, false);
+        go.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);                       // capsule axis (Y) -> bolt axis (Z)
+        go.transform.localScale = new Vector3(radius * 2f, length * 0.5f, radius * 2f);   // capsule is 1 wide, 2 tall
+        MeshRenderer mr = go.GetComponent<MeshRenderer>();
+        mr.sharedMaterial = material;
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        mr.receiveShadows = false;
+    }
+
+    /// <summary>
+    /// True if a droid bolt flying from 'origin' to 'target' (the player) would hit the player first,
+    /// i.e. no wall or other obstacle is in the way. Uses the same sphere-cast as IG88Bolt and ignores
+    /// droid bodies the same way (droids never block each other's shots), so what this says is what the bolt would do.
+    /// </summary>
+    public bool HasClearShot(Vector3 origin, Vector3 target)
+    {
+        Vector3 d = target - origin;
+        float len = d.magnitude;
+        if (len < 0.01f) return true;
+
+        int n = Physics.SphereCastNonAlloc(origin, DroidBoltRadius, d / len, losHits, len, ~0, QueryTriggerInteraction.Ignore);
+        float bestDist = float.MaxValue;
+        Collider first = null;
+        for (int i = 0; i < n; i++)
+        {
+            Collider c = losHits[i].collider;
+            if (c == null) continue;
+            if (c.GetComponentInParent<IG88Controller>() != null) continue;   // droid bodies are ignored by the bolt too
+            if (losHits[i].distance < bestDist) { bestDist = losHits[i].distance; first = c; }
+        }
+
+        if (first == null) return true;          // nothing in the way
+        return IsPlayerCollider(first);          // the first thing the bolt would hit must be the player
+    }
+
+    /// <summary>A droid shoots: takes the next bolt from the pool.</summary>
+    public void FireDroidBolt(Vector3 origin, Vector3 direction)
+    {
+        if (droidBolts.Count == 0) return;
+        IG88Bolt b = droidBolts[nextDroidBolt];
+        nextDroidBolt = (nextDroidBolt + 1) % droidBolts.Count;
+        b.Launch(origin, direction, droidBoltSpeed, DroidBoltRange, droidDamage);
+    }
+
+    /// <summary>Called by a droid bolt when it hits something.</summary>
+    public void DroidBoltHit(RaycastHit hit, Vector3 direction, float damage)
+    {
+        if (droidSparks.Count > 0)
+        {
+            BlasterHitSparks s = droidSparks[nextDroidSpark];
+            nextDroidSpark = (nextDroidSpark + 1) % droidSparks.Count;
+            s.Play(hit.point, hit.normal);
+        }
+
+        if (IsPlayerCollider(hit.collider))
+            DamagePlayer(damage);
+
+        Rigidbody rb = hit.rigidbody;
+        if (rb != null && !rb.isKinematic)
+            rb.AddForceAtPosition(direction.normalized * 3f, hit.point, ForceMode.Impulse);
+    }
+
+    private bool IsPlayerCollider(Collider c)
+    {
+        if (c == null) return false;
+        if (c.CompareTag("Player")) return true;
+        Transform p = Player;
+        if (p == null) return false;
+        Transform ct = c.transform;
+        return ct.IsChildOf(p) || p.IsChildOf(ct);
+    }
+
+    private void EnsureDroidMaterials()
+    {
+        if (boltCoreMat == null) boltCoreMat = RedMaterial("IG88 Bolt Core", new Color(2.4f, 0.7f, 0.7f), false);
+        if (boltGlowMat == null) boltGlowMat = RedMaterial("IG88 Bolt Glow", new Color(1.1f, 0.18f, 0.18f), true);
+        if (boltGlowOuterMat == null) boltGlowOuterMat = RedMaterial("IG88 Bolt Glow Outer", new Color(0.55f, 0.1f, 0.1f), true);
+        if (sparkRedMat == null) sparkRedMat = RedMaterial("IG88 Spark Red", new Color(4f, 0.6f, 0.35f), false);
+        if (sparkWhiteMat == null) sparkWhiteMat = RedMaterial("IG88 Spark White", new Color(4f, 2.2f, 2.0f), false);
+        if (flashRedMat == null) flashRedMat = RedMaterial("IG88 Impact Flash", new Color(2.2f, 0.4f, 0.3f), true);
+    }
+
+    // same recipe as the player's fallback materials, just red
+    private static Material RedMaterial(string materialName, Color emission, bool transparent)
+    {
+        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (shader == null) shader = Shader.Find("Standard");
+        Material m = new Material(shader);
+        m.name = materialName;
+        m.EnableKeyword("_EMISSION");
+        m.SetColor("_EmissionColor", emission);
+        if (transparent)
+        {
+            m.SetFloat("_Surface", 1f);
+            m.SetFloat("_SrcBlend", 1f);
+            m.SetFloat("_DstBlend", 10f);
+            m.SetFloat("_ZWrite", 0f);
+            m.SetColor("_BaseColor", new Color(1f, 1f, 1f, 0f));
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            m.EnableKeyword("_ALPHAPREMULTIPLY_ON");
+            m.renderQueue = 3000;
+        }
+        else
+        {
+            m.SetColor("_BaseColor", Color.black);
+        }
+        return m;
     }
 
     // =====================================================================
