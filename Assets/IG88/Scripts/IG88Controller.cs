@@ -18,7 +18,7 @@ public struct IG88Link { public int node; public IG88EdgeKind kind; }
 ///  - Goes back to its patrol when it has neither seen nor sensed the player for 'Lose Sight Time' seconds.
 ///  - Never spawns on or patrols to G1 / R1 (too close to the player's start). Chasing may still go there.
 ///  - Never touches another droid: it waits until the other droid moves away.
-///  - Has health. At 0 every rigged part breaks loose and falls to the ground.
+///  - Has health. Headshots do more damage than body hits (see the GameManager). At 0 every rigged part breaks loose and falls to the ground.
 /// Procedural walk animation, no Animator needed.
 /// </summary>
 [DisallowMultipleComponent]
@@ -417,6 +417,19 @@ public class IG88Controller : MonoBehaviour
     // ------------------------------------------------------------------ health / death
 
     public bool IsDead { get; private set; }
+
+    /// <summary>
+    /// True if a hit counts as a headshot. Two ways, whichever the prefab allows:
+    ///  1) the collider that was hit belongs to the head bone (a separate head collider), or
+    ///  2) the droid has one big collider: the hit point is at or above the head bone (minus 'Head Hit Margin' from the GameManager).
+    /// </summary>
+    public bool IsHeadHit(Collider hitCollider, Vector3 hitPoint)
+    {
+        if (IsDead || gm == null || !rigReady || head == null || head.t == null) return false;
+        if (hitCollider != null && hitCollider.transform.IsChildOf(head.t)) return true;
+        float height = Vector3.Dot(hitPoint - head.t.position, transform.up);   // metres above (+) / below (-) the head bone
+        return height >= -gm.HeadHitMargin;
+    }
 
     /// <summary>Damage from any source. When health reaches 0 the droid breaks apart.</summary>
     public void TakeDamage(float amount, Vector3 hitPoint, Vector3 hitDirection)
@@ -990,7 +1003,18 @@ public class IG88Controller : MonoBehaviour
 
     void OnDrawGizmosSelected()
     {
-        if (!drawGizmos || !rigReady || target == null || gunTip == null) return;
+        if (!drawGizmos || !rigReady) return;
+
+        // yellow plate = where the head starts: a hit at or above it is a headshot (Head Hit Margin in the GameManager)
+        if (gm != null && head != null && head.t != null)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.matrix = Matrix4x4.TRS(head.t.position - transform.up * gm.HeadHitMargin, transform.rotation, Vector3.one);
+            Gizmos.DrawWireCube(Vector3.zero, new Vector3(0.5f, 0.002f, 0.5f));
+            Gizmos.matrix = Matrix4x4.identity;
+        }
+
+        if (target == null || gunTip == null) return;
         Gizmos.color = aimAtTarget ? Color.red : Color.gray;
         Gizmos.DrawLine(gunTip.t.position, aimPoint);
     }

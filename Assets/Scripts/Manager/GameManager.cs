@@ -52,13 +52,22 @@ public class GameManager : MonoBehaviour
     [SerializeField] private int droidCount = 4;
 
     [Header("IG-88 Health")]
-    [Tooltip("Health of every droid, applied when it spawns. Every hit of the player's blaster takes 'Damage Per Player Hit' away, " +
-             "so with the default of 1: health 1 = 1 shot, health 2 = 2 shots, health 3 = 3 shots ...")]
+    [Tooltip("Health of every droid, applied when it spawns. A body hit takes 'Damage Per Player Hit Body' away, a headshot takes " +
+             "'Damage Per Player Hit Head' away. Example: body 1, head 6 -> with health 6 a droid needs 6 body shots or 1 headshot.")]
     [Min(0.01f)]
     [SerializeField] private float droidHealth = 1f;
-    [Tooltip("How much health one hit of the player's blaster removes from a droid. 1 = Droid Health counts shots.")]
+    [Tooltip("How much health one BODY hit of the player's blaster removes from a droid. 1 = Droid Health counts body shots.")]
+    [FormerlySerializedAs("damagePerPlayerHit")]   // keeps the value you already set in the Inspector
     [Min(0.01f)]
-    [SerializeField] private float damagePerPlayerHit = 1f;
+    [SerializeField] private float damagePerPlayerHitBody = 1f;
+    [Tooltip("How much health one HEADSHOT removes from a droid.")]
+    [Min(0.01f)]
+    [SerializeField] private float damagePerPlayerHitHead = 6f;
+    [Tooltip("Where the head starts. A hit at or above the droid's head bone counts as a headshot; this is how many metres BELOW the head " +
+             "bone a hit still counts. Raise it if shots at the lower face / neck count as body, lower it if upper-chest hits count as head. " +
+             "Select a droid in the Scene view while playing to see the line (yellow plate). Not used if the droid has a separate collider on its head.")]
+    [Range(0f, 0.5f)]
+    [SerializeField] private float headHitMargin = 0.05f;
 
     [Header("IG-88 Detection / Chase")]
     [Tooltip("Detection radius = CLOSE QUARTERS only. Inside this distance a droid detects the Player (tag 'Player') even without " +
@@ -210,6 +219,7 @@ public class GameManager : MonoBehaviour
     public float DroidHealth => droidHealth;
     public bool DroidOff => droidOff;
     public bool DroidPatrolOff => droidPatrolOff;
+    public float HeadHitMargin => headHitMargin;
     public float DetectionRadius => detectionRadius;
     public float SightRange => sightRange;
     public float LoseSightTime => loseSightTime;
@@ -311,13 +321,16 @@ public class GameManager : MonoBehaviour
     }
 
     // Every blaster hit in the scene: if the thing that was hit belongs to a droid, damage that droid.
-    // Every hit counts as 'Damage Per Player Hit' (default 1), so Droid Health = number of shots.
+    // A body hit counts as 'Damage Per Player Hit Body' (default 1), a headshot as 'Damage Per Player Hit Head' (default 6).
     private void OnBlasterHit(BlasterHitInfo info)
     {
         if (info.collider == null) return;
         IG88Controller droid = info.collider.GetComponentInParent<IG88Controller>();
         if (droid != null)
-            droid.TakeDamage(damagePerPlayerHit, info.point, info.direction);
+        {
+            bool headshot = droid.IsHeadHit(info.collider, info.point);
+            droid.TakeDamage(headshot ? damagePerPlayerHitHead : damagePerPlayerHitBody, info.point, info.direction);
+        }
     }
 
     private void OnDestroy()
