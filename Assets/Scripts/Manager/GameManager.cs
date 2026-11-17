@@ -20,6 +20,17 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float playerMaxHealth = 120f;
     [SerializeField] private float playerHealth = 120f;     // live counter in Inspector
 
+    [Header("Damage Blood Overlay (Call of Duty style)")]
+    [Tooltip("Drag your Canvas Images here (each one keeps its own sprite). Only their alpha (m_Color.a) is ever changed, never the colour. They all start at alpha 0. " +
+             "On damage one random Image that is fully faded turns on; a new Image only turns on when one has fully faded again.")]
+    [SerializeField] private List<UnityEngine.UI.Image> bloodImages = new List<UnityEngine.UI.Image>();
+    [Tooltip("The alpha an Image jumps to the moment it turns on.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float bloodHitAlpha = 0.3f;
+    [Tooltip("Seconds the alpha needs to go linearly from the Hit Alpha back to 0.")]
+    [Min(0.01f)]
+    [SerializeField] private float bloodFadeTime = 1f;
+
     [Header("References (auto-finds if empty)")]
     [SerializeField] private BlasterWeapon blaster;
     [SerializeField] private VisorHud visorHud;
@@ -269,6 +280,8 @@ public class GameManager : MonoBehaviour
     }
 
     private bool blasterWasEnabled;
+    private float[] bloodAlphas = new float[0];   // current alpha of every blood Image (same order as the list)
+    private float bloodFadeRate;                  // alpha per second, set at the moment an Image turns on
 
     // an old scene may still have 10 or 11 saved: clamp it to the new maximum
     private void OnValidate()
@@ -283,6 +296,11 @@ public class GameManager : MonoBehaviour
         if (visorHud == null) visorHud = FindFirstObjectByType<VisorHud>();
         if (sway == null) sway = FindFirstObjectByType<WalkSprintRotationSway>();
         if (recoil == null) recoil = FindFirstObjectByType<BlasterRecoil>();
+
+        // blood overlay starts invisible (alpha 0, colour untouched)
+        bloodAlphas = new float[bloodImages.Count];
+        for (int i = 0; i < bloodAlphas.Length; i++)
+            SetBloodAlpha(i, 0f);
 
         // Soft fix for the transform conflict
         if (autoFixSwayRecoilConflict)
@@ -343,6 +361,8 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
+        UpdateBloodFade();
+
         // Optional: also block firing when out of ammo by disabling the component temporarily
         if (blaster != null)
         {
@@ -396,6 +416,54 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    // ---------- Damage blood overlay ----------
+
+    // Only the alpha of m_Color is written, red / green / blue stay exactly as set on the Image.
+    private void SetBloodAlpha(int index, float alpha)
+    {
+        bloodAlphas[index] = alpha;
+        UnityEngine.UI.Image img = bloodImages[index];
+        if (img == null) return;
+        Color c = img.color;
+        c.a = alpha;
+        img.color = c;
+    }
+
+    // Every hit: turn on ONE random Image that is fully faded (alpha 0). If none is fully faded, nothing new turns on.
+    private void ShowBlood()
+    {
+        if (bloodHitAlpha <= 0f) return;
+
+        int n = Mathf.Min(bloodImages.Count, bloodAlphas.Length);
+        int free = 0;
+        for (int i = 0; i < n; i++)
+            if (bloodImages[i] != null && bloodAlphas[i] <= 0f) free++;
+        if (free == 0) return;
+
+        int pick = UnityEngine.Random.Range(0, free);
+        for (int i = 0; i < n; i++)
+        {
+            if (bloodImages[i] == null || bloodAlphas[i] > 0f) continue;
+            if (pick-- > 0) continue;
+
+            bloodFadeRate = bloodHitAlpha / Mathf.Max(0.01f, bloodFadeTime);
+            SetBloodAlpha(i, bloodHitAlpha);
+            return;
+        }
+    }
+
+    // Linear fade back to alpha 0, every Image on its own.
+    private void UpdateBloodFade()
+    {
+        int n = Mathf.Min(bloodImages.Count, bloodAlphas.Length);
+        float step = bloodFadeRate * Time.deltaTime;
+        for (int i = 0; i < n; i++)
+        {
+            if (bloodAlphas[i] <= 0f) continue;
+            SetBloodAlpha(i, Mathf.MoveTowards(bloodAlphas[i], 0f, step));
+        }
+    }
+
     // ---------- Public helpers you can call from other scripts ----------
 
     public void AddAmmo(int amount)
@@ -423,6 +491,7 @@ public class GameManager : MonoBehaviour
         if (playerHealth <= 0f) return;
         playerHealth = Mathf.Clamp(playerHealth - amount, 0f, playerMaxHealth);
         UpdateHealthUI();
+        if (amount > 0f) ShowBlood();
         if (playerHealth <= 0f && playerWasAlive)
         {
             playerWasAlive = false;
