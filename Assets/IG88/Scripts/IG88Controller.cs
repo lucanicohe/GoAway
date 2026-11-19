@@ -8,15 +8,15 @@ public struct IG88Link { public int node; public IG88EdgeKind kind; }
 /// <summary>
 /// IG-88 droid controller. Put this on the droid's root object (the prefab already has it).
 /// The GameManager spawns the droid and calls Init(). From then on the droid:
-///  - PATROLS its route (green or red) at walk speed, along the drawn connections only.
-///  - DETECTS the player (tag "Player") by SIGHT (clear line of sight, up to the Sight Range) or, in close quarters,
-///    by the Detection Radius (no sight needed). It then walks toward him right away at the SAME walk speed
-///    (all connections incl. yellow), aims, and shoots red bolts. There is no firing delay.
-///  - Starts shooting the moment it detects the player by sight, and shoots ONLY while it can see him (never into walls,
-///    never from a mere close-quarters detection through a wall); it keeps walking toward him until it has sight.
-///  - Stops 1 m from the player.
-///  - Goes back to its patrol when it has neither seen nor sensed the player for 'Lose Sight Time' seconds.
-///  - Never spawns on or patrols to G1 / R1 (too close to the player's start). Chasing may still go there.
+///  - PATROLS its route at walk speed, along the drawn connections of its own colour AND the yellow ones.
+///  - FIRST DETECTION is by SIGHT only (clear line of sight, up to the Sight Range). The Detection Radius does nothing yet.
+///    Once it has seen the player and then lost sight, it may also sense him inside the Detection Radius (no sight needed),
+///    but only for 'Lose Sight Time' seconds after it LAST SAW him. After that it forgets him and must SEE him again.
+///  - CHASE: walks along the waypoint track (all connections) to the closest point of the track to the player, and stops there.
+///    It shoots red bolts ONLY while it can see him (never into walls). As soon as it has a clear shot it stops and fires;
+///    it only walks again when the player moves.
+///  - Never gets closer than 1 m to the player.
+///  - Goes back to its patrol when it has not SEEN the player for 'Lose Sight Time' seconds.
 ///  - Never touches another droid: it waits until the other droid moves away.
 ///  - Has health. Headshots do more damage than body hits (see the GameManager). At 0 every rigged part breaks loose and falls to the ground.
 /// Procedural walk animation, no Animator needed.
@@ -103,12 +103,20 @@ public class IG88Controller : MonoBehaviour
     int goalNode = -1;      // chase goal or "return to patrol" goal
     bool returning;         // walking back to the patrol network after a chase
 
+    // chase stop point: the closest point on the waypoint track (any connection) to the player. A chasing droid walks there and stops.
+    bool hasStopPoint;
+    int stopA = -1, stopB = -1;   // the connection the stop point lies on
+    float stopT;                  // 0 = at stopA, 1 = at stopB
+    Vector3 stopPoint;
+
     float blockedTime;
     float blockLimit = 3f;
     float backoffTimer;
 
-    float lastAwareTime;    // last moment the droid saw / sensed the player (a chase ends 'Lose Sight Time' seconds after this)
+    float lastSightTime;    // last moment the droid SAW the player (a chase ends 'Lose Sight Time' seconds after this)
+    bool hasSeenPlayer;     // true from the first sighting until the droid gives up: only then may the Detection Radius be used
     bool seesPlayer;        // this frame: player within Sight Range and a clear line of sight from the droid's head (updated in UpdateMode)
+    bool clearShot;         // this frame: seesPlayer AND the bolt path from the gun tip to the player is free (updated in UpdateMode)
     float nextFireTime;
     Vector3 aimPoint;       // where the droid aims (centre of the player)
 
@@ -138,6 +146,8 @@ public class IG88Controller : MonoBehaviour
 
     const float ReverseMargin = 0.05f;
     const float GoalHysteresis = 0.75f;
+    const float StopPointHysteresis = 0.25f;   // the stop point only jumps to another spot of the track if that is this much closer to the player
+    const float ArriveEps = 0.02f;             // metres: this close to the stop point = arrived
     const float CloseDistance = 1f;     // chasing droids walk until they are this close to the player
     const float LookFadeTime = 0.2f;    // green <-> red fade
     static readonly List<int> tmp = new List<int>();
@@ -176,6 +186,11 @@ public class IG88Controller : MonoBehaviour
         IsDead = false;
         health = gm.DroidHealth;
         alertBlend = 0f;
+        hasSeenPlayer = false;
+        seesPlayer = false;
+        clearShot = false;
+        hasStopPoint = false;
+        lastSightTime = -999f;
         homeHops = gm.RouteHops(route, startNode);   // my home = the waypoint I spawned on
         transform.position = gm.NodePos(startNode);
         SetupGlow();
@@ -609,35 +624,51 @@ public class IG88Controller : MonoBehaviour
         bool canChase = !gm.DroidOff && !gm.DroidPatrolOff && p != null;
 
         // DETECTION (is the droid aware of the player right now?)
-        //  - close quarters: inside the Detection Radius it senses the player, no sight needed
-        //  - distance: up to the Sight Range it detects the player as soon as it can SEE him (no wall in between)
-        // 'seesPlayer' is worked out once per frame and is ALSO what the shooting uses, so the droid fires exactly when it sees you.
+        //  - FIRST detection is by SIGHT only: a clear line of sight closer than the Sight Range. The Detection Radius does nothing yet.
+        //  - After the droid has seen the player (and maybe lost sight) it may ALSO sense him inside the Detection Radius,
+        //    but only until 'Lose Sight Time' seconds after it LAST SAW him. After that it forgets him (see below) and needs sight again.
+        // 'seesPlayer' / 'clearShot' are worked out once per frame and are ALSO what the stopping and shooting use.
         seesPlayer = false;
+        clearShot = false;
         bool aware = false;
         if (canChase)
         {
             float d = Vector3.Distance(transform.position, p.position);
             seesPlayer = d < gm.SightRange && CanSeePlayer(p);
-            aware = seesPlayer || d < gm.DetectionRadius;
+            if (seesPlayer)
+            {
+                hasSeenPlayer = true;
+                lastSightTime = Time.time;
+                // clear shot = it sees him AND the bolt would hit him (free path from the gun tip, not only from the head)
+                clearShot = rigReady && gunTip != null && gm.HasClearShot(gunTip.t.position, gm.PlayerAimPoint);
+            }
+            bool radiusAllowed = hasSeenPlayer && Time.time <= lastSightTime + gm.LoseSightTime;
+            aware = seesPlayer || (radiusAllowed && d < gm.DetectionRadius);
         }
-        if (aware) lastAwareTime = Time.time;
+        else
+        {
+            hasSeenPlayer = false;
+        }
 
         if (mode == Mode.Patrol && aware)
         {
             mode = Mode.Chase;
             returning = false;
             goalNode = -1;
+            hasStopPoint = false;
             blockedTime = 0f;
             backoffTimer = 0f;
             aimAtTarget = true;
-            lastAwareTime = Time.time;
             nextFireTime = Time.time;   // no delay: the first shot is allowed right away (the gun only has to swing onto the player)
         }
-        else if (mode == Mode.Chase && (!canChase || Time.time > lastAwareTime + gm.LoseSightTime))
+        else if (mode == Mode.Chase && (!canChase || Time.time > lastSightTime + gm.LoseSightTime))
         {
-            // player gone (or droids switched off) / not seen or sensed for 'Lose Sight Time' seconds: back to patrol
+            // player gone (or droids switched off) / not SEEN for 'Lose Sight Time' seconds: forget him, back to patrol.
+            // From now on the Detection Radius is off again until the droid SEES him.
             mode = Mode.Patrol;
             aimAtTarget = false;
+            hasSeenPlayer = false;
+            hasStopPoint = false;
             BeginReturnToPatrol();
         }
 
@@ -655,15 +686,16 @@ public class IG88Controller : MonoBehaviour
         return gm.HasClearShot(eye, gm.PlayerAimPoint);
     }
 
+    // my patrol network = connections of my own colour + the yellow ones
     bool Matches(IG88EdgeKind kind)
     {
-        return route == IG88Route.Green ? kind == IG88EdgeKind.Green : kind == IG88EdgeKind.Red;
+        return GameManager.PatrolEdgeMatches(route, kind);
     }
 
     void BeginReturnToPatrol()
     {
         if (toNode >= 0) returning = !Matches(gm.EdgeKindOf(fromNode, toNode));
-        else returning = !gm.NodeInRoute(fromNode, route);
+        else returning = !gm.NodeOnPatrolNetwork(fromNode, route);
 
         if (returning)
         {
@@ -677,52 +709,95 @@ public class IG88Controller : MonoBehaviour
         }
     }
 
-    // nearest node that belongs to my patrol route, measured along the connections
+    // path length from where I am (standing on fromNode, or somewhere on the connection fromNode-toNode) to a node
+    float CostToNode(int n)
+    {
+        if (toNode >= 0)
+        {
+            Vector3 pos = transform.position;
+            float viaTo = Vector3.Distance(pos, gm.NodePos(toNode)) + gm.PathDist(toNode, n);
+            float viaFrom = Vector3.Distance(pos, gm.NodePos(fromNode)) + gm.PathDist(fromNode, n);
+            return Mathf.Min(viaTo, viaFrom);
+        }
+        return gm.PathDist(fromNode, n);
+    }
+
+    // nearest node of my patrol network (own colour + yellow), measured along the connections
     int NearestRouteNode()
     {
-        int[] nodes = gm.RouteNodes(route);
-        Vector3 pos = transform.position;
+        int count = gm.NodeCount;
         int best = -1;
         float bestCost = float.MaxValue;
-        for (int i = 0; i < nodes.Length; i++)
+        for (int n = 0; n < count; n++)
         {
-            int n = nodes[i];
-            if (gm.IsNoPatrolNode(n)) continue;   // never "return to patrol" onto G1 / R1
-            float cost;
-            if (toNode >= 0)
-            {
-                float viaTo = Vector3.Distance(pos, gm.NodePos(toNode)) + gm.PathDist(toNode, n);
-                float viaFrom = Vector3.Distance(pos, gm.NodePos(fromNode)) + gm.PathDist(fromNode, n);
-                cost = Mathf.Min(viaTo, viaFrom);
-            }
-            else cost = gm.PathDist(fromNode, n);
-
+            if (gm.IsNoPatrolNode(n)) continue;                  // never "return to patrol" onto a blocked waypoint
+            if (!gm.NodeOnPatrolNetwork(n, route)) continue;
+            float cost = CostToNode(n);
             if (cost < bestCost) { bestCost = cost; best = n; }
         }
         return best;
     }
 
+    // Chase target = the closest point on the waypoint track to the player (it can lie in the middle of a connection).
+    // 'goalNode' = the end of that connection that is cheaper to reach first; the last bit is walked along the connection itself.
     void UpdateChaseGoal(Transform player)
     {
         if (player == null) return;
-        int best = gm.NearestNode(player.position);
-        if (best < 0) return;
-        if (goalNode < 0)
+
+        int a, b; float t; Vector3 pt;
+        if (!gm.ClosestTrackPoint(player.position, out a, out b, out t, out pt)) return;
+
+        if (hasStopPoint) stopPoint = Vector3.Lerp(gm.NodePos(stopA), gm.NodePos(stopB), stopT);   // follows waypoints that move while playing
+        if (!hasStopPoint ||
+            Vector3.Distance(player.position, pt) + StopPointHysteresis < Vector3.Distance(player.position, stopPoint))
+        {
+            // the player moved: a new spot of the track is clearly closer to him (hysteresis stops flip-flopping between two spots)
+            hasStopPoint = true;
+            stopA = a; stopB = b; stopT = t; stopPoint = pt;
+        }
+
+        float costA = CostToNode(stopA) + Vector3.Distance(gm.NodePos(stopA), stopPoint);
+        float costB = CostToNode(stopB) + Vector3.Distance(gm.NodePos(stopB), stopPoint);
+        int best = costA <= costB ? stopA : stopB;
+        if (goalNode != stopA && goalNode != stopB)
         {
             goalNode = best;
         }
         else if (best != goalNode)
         {
-            float dBest = Vector3.Distance(player.position, gm.NodePos(best));
-            float dCur = Vector3.Distance(player.position, gm.NodePos(goalNode));
-            if (dBest + GoalHysteresis < dCur) goalNode = best; // hysteresis stops flip-flopping between 2 nodes
+            float cur = goalNode == stopA ? costA : costB;
+            float cand = best == stopA ? costA : costB;
+            if (cand + GoalHysteresis < cur) goalNode = best;
         }
+    }
+
+    // true while I walk on the connection that holds the stop point
+    bool IsOnStopEdge()
+    {
+        if (mode != Mode.Chase || !hasStopPoint || toNode < 0) return false;
+        return (fromNode == stopA && toNode == stopB) || (fromNode == stopB && toNode == stopA);
+    }
+
+    // standing on one end of the stop connection: the node at its other end (walk along it to the stop point), or -1 if the stop point is right here
+    int FinalLegTarget()
+    {
+        if (!hasStopPoint) return -1;
+        int other = fromNode == stopA ? stopB : (fromNode == stopB ? stopA : -1);
+        if (other < 0) return -1;
+        if (Vector3.Distance(gm.NodePos(fromNode), stopPoint) <= ArriveEps) return -1;
+        return other;
     }
 
     // standing on fromNode: which node do we walk to next? (-1 = stay)
     int ChooseNext()
     {
-        if (mode == Mode.Chase || returning)
+        if (mode == Mode.Chase)
+        {
+            if (goalNode < 0) return -1;
+            if (goalNode == fromNode) return FinalLegTarget();   // on the end of the stop connection: walk along it to the stop point
+            return gm.NextHop(fromNode, goalNode);
+        }
+        if (returning)
         {
             if (goalNode < 0 || goalNode == fromNode) return -1;
             return gm.NextHop(fromNode, goalNode);
@@ -798,15 +873,20 @@ public class IG88Controller : MonoBehaviour
 
         if (mode == Mode.Chase && player != null)
         {
+            // 1) clear shot and the player stands still: stop and fire. The droid only walks again when the player moves.
+            if (clearShot && !gm.PlayerMoving) return Idle(dt);
+
             Vector3 toPlayer = player.position - transform.position;
 
-            // no stopping on detection: the droid walks toward the player right away (and shoots while walking).
-            // 1 m from the player: stop and keep facing him
+            // 2) 1 m from the player: stop and keep facing him
             if (Vector3.ProjectOnPlane(toPlayer, transform.up).magnitude <= CloseDistance)
             {
                 FaceDirection(toPlayer, dt);
                 return false;
             }
+
+            // 3) at the closest point of the waypoint track to the player: stop and keep facing him
+            if (hasStopPoint && Vector3.Distance(transform.position, stopPoint) <= ArriveEps) return Idle(dt);
         }
 
         // standing on a node -> decide where to go
@@ -820,15 +900,25 @@ public class IG88Controller : MonoBehaviour
 
         Vector3 pos = transform.position;
 
-        // chase / returning: if the goal is now behind us, turn around in the middle of the connection
-        if ((mode == Mode.Chase || returning) && goalNode >= 0 && backoffTimer <= 0f)
+        // chase, on the connection that holds the stop point: walk straight to the stop point, in whichever direction it lies
+        bool onStopEdge = IsOnStopEdge();
+        if (onStopEdge)
         {
+            Vector3 ed = gm.NodePos(toNode) - gm.NodePos(fromNode);
+            if (ed.sqrMagnitude > 1e-8f && Vector3.Dot(stopPoint - pos, ed) < 0f)
+            {
+                int sw = fromNode; fromNode = toNode; toNode = sw;   // the stop point is behind me: turn around (no back-off pause)
+            }
+        }
+        else if ((mode == Mode.Chase || returning) && goalNode >= 0 && backoffTimer <= 0f)
+        {
+            // chase / returning: if the goal is now behind us, turn around in the middle of the connection
             float fwd = Vector3.Distance(pos, gm.NodePos(toNode)) + gm.PathDist(toNode, goalNode);
             float back = Vector3.Distance(pos, gm.NodePos(fromNode)) + gm.PathDist(fromNode, goalNode);
             if (back + ReverseMargin < fwd) Reverse();
         }
 
-        Vector3 tp = gm.NodePos(toNode);
+        Vector3 tp = onStopEdge ? stopPoint : gm.NodePos(toNode);
         Vector3 dir = tp - pos;
         float dist = dir.magnitude;
 
@@ -845,22 +935,23 @@ public class IG88Controller : MonoBehaviour
             blockedTime += dt;
             if (blockedTime >= blockLimit)
             {
-                // head-on / circular deadlock: back off
+                // head-on / circular deadlock: back off (not while walking to the stop point: it just waits there)
                 blockedTime = 0f;
                 blockLimit = Random.Range(2f, 4f);
-                Reverse();
+                if (!onStopEdge) Reverse();
             }
             return Idle(dt);
         }
         blockedTime = 0f;
 
         transform.position = newPos;
-        if (arrives)
+        if (arrives && !onStopEdge)
         {
             prevNode = fromNode;
             fromNode = toNode;
             toNode = -1;
         }
+        // arrived on the stop point in the middle of its connection: stay there (the stop check at the top keeps the droid standing)
         return true;
     }
 
@@ -884,9 +975,10 @@ public class IG88Controller : MonoBehaviour
         Vector3 gunDir = gun.t.TransformDirection(gunFwdLocal);
         if (Vector3.Angle(gunDir, want) > maxFireAngle) return;
 
-        // and the bolt itself must have a free path: checked from the gun tip (where the bolt starts) to the player, so it never
-        // shoots into a wall even if the head sees past a corner. Done BEFORE the cooldown is set, so it fires the moment the way is free.
-        if (!gm.HasClearShot(origin, aimPoint)) return;
+        // and the bolt itself must have a free path: checked from the gun tip (where the bolt starts) to the player (clearShot, worked out
+        // in UpdateMode), so it never shoots into a wall even if the head sees past a corner. Done BEFORE the cooldown is set, so it fires
+        // the moment the way is free.
+        if (!clearShot) return;
 
         nextFireTime = Time.time + 1f / Mathf.Max(0.1f, gm.DroidFireRate);
 

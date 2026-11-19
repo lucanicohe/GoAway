@@ -81,16 +81,20 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float headHitMargin = 0.05f;
 
     [Header("IG-88 Detection / Chase")]
-    [Tooltip("Detection radius = CLOSE QUARTERS only. Inside this distance a droid detects the Player (tag 'Player') even without " +
-             "seeing him (it senses him through walls, from behind ...). Keep it small, e.g. 4-6 m. Farther away it needs SIGHT (see Sight Range).")]
+    [Tooltip("Detection radius = CLOSE QUARTERS only, and ONLY after the droid has already SEEN the player once. Before its first sighting a droid " +
+             "detects the Player (tag 'Player') by SIGHT only, this radius does nothing. After it has seen him and lost sight, it also senses him inside " +
+             "this distance (through walls, from behind ...), but only for 'Lose Sight Time' seconds after it last SAW him. After that it forgets him and " +
+             "has to SEE him again. Keep it small, e.g. 4-6 m.")]
     [FormerlySerializedAs("chaseRadius")]   // keeps the value you already set in the Inspector
     [Min(0f)]
     [SerializeField] private float detectionRadius = 5f;
     [Tooltip("SIGHT: a droid detects the Player the moment it can SEE him (clear line of sight, no wall in between) closer than this, " +
-             "and it shoots him as long as it sees him. This is also how far droids shoot. Must be larger than the Detection Radius to make a difference.")]
+             "and it shoots him as long as it sees him. Sight is the ONLY way a droid detects the player for the first time. " +
+             "This is also how far droids shoot.")]
     [Min(0f)]
     [SerializeField] private float sightRange = 40f;
-    [Tooltip("Seconds a chasing droid keeps chasing after it last saw / sensed the player. Then it gives up and goes back to its patrol. " +
+    [Tooltip("Seconds a chasing droid keeps chasing after it last SAW the player (the timer counts from the last sight, the Detection Radius does " +
+             "not extend it). Then it gives up, forgets him and goes back to its patrol; to chase again it has to SEE him. " +
              "While the timer runs it still walks toward him around corners.")]
     [Min(0f)]
     [SerializeField] private float loseSightTime = 10f;
@@ -179,7 +183,7 @@ public class GameManager : MonoBehaviour
         new Edge(R2, R3, IG88EdgeKind.Red),
         new Edge(R3, G3, IG88EdgeKind.Red),
         new Edge(G3, R4, IG88EdgeKind.Red),
-        // yellow (chase only)
+        // yellow (patrolled by BOTH routes, and used for chasing)
         new Edge(R5, G6, IG88EdgeKind.Yellow),
         new Edge(R1, G1, IG88EdgeKind.Yellow),
     };
@@ -209,6 +213,13 @@ public class GameManager : MonoBehaviour
     readonly List<IG88Controller> droids = new List<IG88Controller>();
     Transform player;
     float nextPlayerSearch;
+
+    // ----- player movement: a droid that has a clear shot stands still and fires until the player moves -----
+    Vector3 lastPlayerPos;
+    bool havePlayerPos;
+    float lastPlayerMoveTime = -999f;
+    const float PlayerMovingSpeed = 0.1f;    // m/s: above this speed the player counts as moving
+    const float PlayerMovingGrace = 0.25f;   // s: after his last movement the player still counts as moving this long (smooths physics-step stutter)
     Collider playerCollider;
     Transform playerColliderOwner;
     bool playerWasAlive = true;
@@ -246,6 +257,9 @@ public class GameManager : MonoBehaviour
     public Material DroidGlowMaterial => droidGlowMaterial;
     public float MinDroidDistance => minDroidDistance;
     public int PatrolZoneSize => patrolZoneSize;
+
+    /// <summary>True while the player is moving (position changes), false once he stands still.</summary>
+    public bool PlayerMoving => Time.time - lastPlayerMoveTime < PlayerMovingGrace;
 
     /// <summary>The object tagged "Player" (found automatically).</summary>
     public Transform Player
@@ -362,6 +376,7 @@ public class GameManager : MonoBehaviour
     private void Update()
     {
         UpdateBloodFade();
+        TrackPlayerMovement();
 
         // Optional: also block firing when out of ammo by disabling the component temporarily
         if (blaster != null)
@@ -377,6 +392,20 @@ public class GameManager : MonoBehaviour
             nextGraphRebuild = Time.time + 1f;
             RebuildDistances();
         }
+    }
+
+    // Runs before the droids (execution order -50). The droids ask 'PlayerMoving'.
+    private void TrackPlayerMovement()
+    {
+        Transform p = Player;
+        if (p == null) { havePlayerPos = false; return; }
+        if (!havePlayerPos) { lastPlayerPos = p.position; havePlayerPos = true; return; }
+
+        float dt = Time.deltaTime;
+        if (dt <= 0f) return;
+        float speed = (p.position - lastPlayerPos).magnitude / dt;
+        lastPlayerPos = p.position;
+        if (speed > PlayerMovingSpeed) lastPlayerMoveTime = Time.time;
     }
 
     private void OnWeaponFired(BlasterWeapon weapon)
@@ -613,6 +642,24 @@ public class GameManager : MonoBehaviour
         return false;
     }
 
+    /// <summary>True if a connection of this colour belongs to the patrol network of a route: its OWN colour plus the YELLOW ones.</summary>
+    public static bool PatrolEdgeMatches(IG88Route r, IG88EdgeKind kind)
+    {
+        if (kind == IG88EdgeKind.Yellow) return true;
+        return r == IG88Route.Green ? kind == IG88EdgeKind.Green : kind == IG88EdgeKind.Red;
+    }
+
+    /// <summary>True if the waypoint has at least one connection a droid of that route patrols (own colour or yellow).</summary>
+    public bool NodeOnPatrolNetwork(int node, IG88Route r)
+    {
+        List<IG88Link> ls = links[node];
+        for (int i = 0; i < ls.Count; i++)
+            if (PatrolEdgeMatches(r, ls[i].kind)) return true;
+        return false;
+    }
+
+    public int NodeCount { get { return nodes != null ? nodes.Length : 0; } }
+
     public IG88EdgeKind EdgeKindOf(int a, int b)
     {
         foreach (Edge e in Edges)
@@ -630,6 +677,34 @@ public class GameManager : MonoBehaviour
             if (d < bestD) { bestD = d; best = i; }
         }
         return best;
+    }
+
+    /// <summary>
+    /// The closest point on the whole waypoint track (green + red + yellow connections) to a world position.
+    /// The point lies on the connection a-b, t = 0 is at node a, t = 1 is at node b.
+    /// </summary>
+    public bool ClosestTrackPoint(Vector3 p, out int a, out int b, out float t, out Vector3 point)
+    {
+        a = -1; b = -1; t = 0f; point = p;
+        if (!graphReady) return false;
+
+        float best = float.MaxValue;
+        for (int i = 0; i < Edges.Length; i++)
+        {
+            Vector3 pa = nodes[Edges[i].a].position;
+            Vector3 pb = nodes[Edges[i].b].position;
+            Vector3 ab = pb - pa;
+            float len2 = ab.sqrMagnitude;
+            float tt = len2 > 1e-8f ? Mathf.Clamp01(Vector3.Dot(p - pa, ab) / len2) : 0f;
+            Vector3 q = pa + ab * tt;
+            float d = (q - p).sqrMagnitude;
+            if (d < best)
+            {
+                best = d;
+                a = Edges[i].a; b = Edges[i].b; t = tt; point = q;
+            }
+        }
+        return a >= 0;
     }
 
     // =====================================================================
@@ -731,7 +806,7 @@ public class GameManager : MonoBehaviour
         return best;
     }
 
-    /// <summary>Number of connections from 'start' to every waypoint, walking only along the connections of one patrol route.</summary>
+    /// <summary>Number of connections from 'start' to every waypoint, walking only along the patrol network of one route (its own colour + the yellow connections).</summary>
     public int[] RouteHops(IG88Route r, int start)
     {
         int[] hops = new int[nodes.Length];
@@ -745,7 +820,7 @@ public class GameManager : MonoBehaviour
             List<IG88Link> ls = links[n];
             for (int i = 0; i < ls.Count; i++)
             {
-                bool ok = r == IG88Route.Green ? ls[i].kind == IG88EdgeKind.Green : ls[i].kind == IG88EdgeKind.Red;
+                bool ok = PatrolEdgeMatches(r, ls[i].kind);
                 if (!ok || hops[ls[i].node] != 999) continue;
                 hops[ls[i].node] = hops[n] + 1;
                 q.Enqueue(ls[i].node);

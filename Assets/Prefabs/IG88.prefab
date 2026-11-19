@@ -198,7 +198,7 @@ PrefabInstance:
     - target: {fileID: 2512878663927567463, guid: 9e1f753e84c63c5b8176ba2020f14194, type: 3}
       propertyPath: 'm_Materials.Array.data[0]'
       value: 
-      objectReference: {fileID: 2100000, guid: 95a07d81475644e97957932973605b98, type: 2}
+      objectReference: {fileID: 2100000, guid: ec2c3ffe6070b4da9bd9c9ec862def68, type: 2}
     - target: {fileID: 2512878663927567463, guid: 9e1f753e84c63c5b8176ba2020f14194, type: 3}
       propertyPath: 'm_Materials.Array.data[1]'
       value: 
@@ -237,20 +237,24 @@ MonoBehaviour:
   walking: 1
   aimAtTarget: 1
   target: {fileID: 0}
+  health: 1
+  scatterForce: 3
+  spinForce: 4
+  leafPieceSize: 0.12
+  debrisLifetime: 0
   chaseLight: {fileID: 3115129910247020234}
-  lightFadeTime: 0.2
   thighSwing: 26
   kneeBend: 38
   armSwing: 14
   bodyBob: 0.025
   torsoTwist: 4
-  runPoseMultiplier: 1.35
   maxBodyTurn: 85
   waistShare: 0.4
   headFollow: 0.7
   maxHeadTurn: 60
   maxArmTurn: 110
   aimSmoothTime: 0.15
+  maxFireAngle: 35
   drawGizmos: 1
 --- !u!136 &2784920271301283989
 CapsuleCollider:
