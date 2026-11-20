@@ -1,0 +1,245 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace FlatheadRobotKit
+{
+    /// <summary>
+    /// Four-legged turret robot controller (on the root of the robot prefab).
+    ///   [x] Walking        - spider-style walk. Works in ANY direction (Walk Direction 0-360) because the feet simply
+    ///                        step toward the direction of travel; the body never has to turn.
+    ///   [x] Aim At Target  - the turret pans and tilts so the gun points at the Target object.
+    ///   [x] Jump           - crouch, launch, tuck the legs, land. Keeps jumping while ticked.
+    /// All three can be ticked at the same time. Procedural (code on the FBX bones): no Animator needed.
+    /// </summary>
+    [DisallowMultipleComponent]
+    [AddComponentMenu("Flathead Robot/Flathead Controller")]
+    public class FlatheadController : MonoBehaviour
+    {
+        [Header("TICK THESE")]
+        public bool walking = false;
+        public bool aimAtTarget = true;
+        public bool jump = false;
+
+        [Tooltip("The object the gun aims at. Move it in the Scene view.")]
+        public Transform target;
+
+        [Header("Walk")]
+        [Tooltip("Direction of travel relative to the robot: 0 = forward, 90 = right, 180 = back, 270 = left.")]
+        [Range(0f, 360f)] public float walkDirection = 0f;
+        [Tooltip("Steps (full cycles) per second.")]
+        [Range(0.3f, 4f)] public float stepsPerSecond = 1.4f;
+        [Range(0.05f, 0.5f)] public float strideLength = 0.30f;
+        [Range(0.02f, 0.3f)] public float stepHeight = 0.13f;
+        [Range(0f, 0.05f)] public float bodyBob = 0.015f;
+        [Range(0f, 10f)] public float bodyLean = 3f;
+        [Tooltip("Also move the robot along the walk direction (feet are matched to the speed so they don't slide).")]
+        public bool moveWhileWalking = false;
+
+        [Header("Aim")]
+        [Tooltip("Max degrees per second the turret turns.")]
+        [Range(30f, 1080f)] public float turretSpeed = 420f;
+        [Range(-45f, 0f)] public float tiltMin = -15f;
+        [Range(0f, 89f)] public float tiltMax = 70f;
+        [Tooltip("Demo: makes the Target circle around the robot so you can watch the turret track it.")]
+        public bool orbitTarget = false;
+        public float orbitRadius = 3.5f;
+        public float orbitHeight = 1.3f;
+        public float orbitSpeed = 40f;
+
+        [Header("Jump")]
+        [Range(0.1f, 1.5f)] public float jumpHeight = 0.45f;
+        [Range(0.4f, 2f)] public float jumpDuration = 0.9f;
+        [Range(0f, 0.3f)] public float crouchDepth = 0.12f;
+        [Tooltip("Pause between jumps while the box stays ticked.")]
+        [Range(0f, 2f)] public float jumpPause = 0.35f;
+
+        class RigBone { public Transform t; public Vector3 restPos; public Quaternion restRot; }
+
+        static readonly string[] LegNames = { "Leg_R_Front", "Leg_L_Rear", "Leg_L_Front", "Leg_R_Rear" };   // first two = one trot pair
+        RigBone[] all;
+        RigBone body, pan, tilt, muzzle, root;
+        RigBone[] upper = new RigBone[4], lower = new RigBone[4], foot = new RigBone[4], tip = new RigBone[4];
+        Vector3[] ankleRest = new Vector3[4];       // root-local
+        Vector3[] tipOffset = new Vector3[4];       // root-local (ankle -> toe, constant)
+        Quaternion[] footRestRoot = new Quaternion[4];
+        Vector3 lF, lU, lR;                          // robot basis in root-local space
+        float yawSign = 1f, tiltSign = 1f;
+        bool ready;
+        float phase, walkW, aimW, yaw, pitch, yawVel, pitchVel, jumpU = -1f, nextJump, orbitAngle;
+        const float Duty = 0.55f;
+
+        /// <summary>Direction the robot faces (world, flattened).</summary>
+        public Vector3 Forward { get { return Vector3.ProjectOnPlane(transform.TransformDirection(lF), transform.up).normalized; } }
+        /// <summary>Walking speed (m/s) at which the feet don't slide.</summary>
+        public float WalkSpeed { get { return strideLength * stepsPerSecond / Duty; } }
+        public bool IsJumping { get { return jumpU >= 0f; } }
+
+        void Awake() { DetectRig(); }
+
+        List<RigBone> allList;
+
+        /// <summary>Finds the bones and measures the rest pose. Safe to call more than once.</summary>
+        public bool DetectRig()
+        {
+            if (ready) return true;
+            Dictionary<string, Transform> map = new Dictionary<string, Transform>();
+            foreach (Transform t in GetComponentsInChildren<Transform>(true)) if (!map.ContainsKey(t.name)) map[t.name] = t;
+            allList = new List<RigBone>();
+            all = null;
+            // small helper so Grab can append
+            RigBone G(string n) { Transform t; if (!map.TryGetValue(n, out t)) { Debug.LogError("FlatheadController: bone '" + n + "' not found. Use the Flathead prefab / Flathead.fbx.", this); return null; } RigBone b = new RigBone(); b.t = t; b.restPos = t.localPosition; b.restRot = t.localRotation; allList.Add(b); return b; }
+            root = G("Root"); body = G("Body"); pan = G("Gun_Pan"); tilt = G("Gun_Tilt"); muzzle = G("Gun_Muzzle");
+            for (int i = 0; i < 4; i++)
+            {
+                upper[i] = G(LegNames[i] + "_Upper"); lower[i] = G(LegNames[i] + "_Lower"); foot[i] = G(LegNames[i] + "_Foot"); tip[i] = G(LegNames[i] + "_Tip");
+            }
+            if (root == null || body == null || pan == null || tilt == null || muzzle == null) return false;
+            for (int i = 0; i < 4; i++) if (upper[i] == null || lower[i] == null || foot[i] == null || tip[i] == null) return false;
+
+            // basis from the gun barrel (forward) - independent of how Unity converted the FBX axes
+            Vector3 up = transform.up;
+            Vector3 f = Vector3.ProjectOnPlane(muzzle.t.position - tilt.t.position, up);
+            if (f.sqrMagnitude < 1e-8f) f = transform.forward;
+            f.Normalize();
+            lF = transform.InverseTransformDirection(f).normalized;
+            lU = transform.InverseTransformDirection(up).normalized;
+            lR = Vector3.Cross(lU, lF).normalized;          // physical right
+            yawSign = Vector3.Dot(Quaternion.AngleAxis(10f, lU) * lF, lR) > 0f ? 1f : -1f;
+            tiltSign = Vector3.Dot(Quaternion.AngleAxis(10f, lR) * lF, lU) > 0f ? 1f : -1f;
+
+            for (int i = 0; i < 4; i++)
+            {
+                ankleRest[i] = transform.InverseTransformPoint(foot[i].t.position);
+                tipOffset[i] = transform.InverseTransformPoint(tip[i].t.position) - ankleRest[i];
+                footRestRoot[i] = Quaternion.Inverse(transform.rotation) * foot[i].t.rotation;
+            }
+            all = allList.ToArray();
+            ready = true;
+            return true;
+        }
+
+        static float SStep(float x) { x = Mathf.Clamp01(x); return x * x * (3f - 2f * x); }
+
+        static void TwoBoneIK(Transform upperT, Transform midT, Transform endT, Vector3 target, Vector3 pole)
+        {
+            Vector3 a = upperT.position, b = midT.position, c = endT.position;
+            float l1 = (b - a).magnitude, l2 = (c - b).magnitude;
+            Vector3 toT = target - a; float dist = toT.magnitude;
+            if (dist < 1e-4f || l1 < 1e-4f) return;
+            Vector3 dir = toT / dist;
+            float d = Mathf.Clamp(dist, Mathf.Abs(l1 - l2) + 0.001f, l1 + l2 - 0.001f);
+            float cosA = (l1 * l1 + d * d - l2 * l2) / (2f * l1 * d);
+            float sinA = Mathf.Sqrt(Mathf.Max(0f, 1f - cosA * cosA));
+            Vector3 pl = Vector3.ProjectOnPlane(pole, dir);
+            if (pl.sqrMagnitude < 1e-6f) return;
+            pl.Normalize();
+            Vector3 newMid = a + dir * (l1 * cosA) + pl * (l1 * sinA);
+            upperT.rotation = Quaternion.FromToRotation(b - a, newMid - a) * upperT.rotation;
+            Vector3 m2 = midT.position, c2 = endT.position;
+            midT.rotation = Quaternion.FromToRotation(c2 - m2, (a + dir * d) - m2) * midT.rotation;
+        }
+
+        void LateUpdate()
+        {
+            if (!ready && !DetectRig()) return;
+            float dt = Time.deltaTime;
+
+            if (orbitTarget && target != null)
+            {
+                orbitAngle += orbitSpeed * dt;
+                float a = orbitAngle * Mathf.Deg2Rad;
+                Vector3 c = transform.position;
+                target.position = c + new Vector3(Mathf.Cos(a) * orbitRadius, orbitHeight, Mathf.Sin(a) * orbitRadius);
+            }
+
+            for (int i = 0; i < all.Length; i++) { all[i].t.localPosition = all[i].restPos; all[i].t.localRotation = all[i].restRot; }
+
+            // ---------- state
+            walkW = Mathf.MoveTowards(walkW, walking ? 1f : 0f, dt / 0.25f);
+            if (walkW > 0f) phase = Mathf.Repeat(phase + stepsPerSecond * dt, 1f);
+
+            if (jumpU < 0f)
+            {
+                if (jump && Time.time >= nextJump) jumpU = 0f;
+            }
+            else
+            {
+                jumpU += dt / Mathf.Max(0.2f, jumpDuration);
+                if (jumpU >= 1f) { jumpU = -1f; nextJump = Time.time + jumpPause; }
+            }
+
+            float jw = jumpU >= 0f ? 1f : 0f;
+            float dirRad = walkDirection * Mathf.Deg2Rad;
+            Vector3 d3 = lF * Mathf.Cos(dirRad) + lR * Mathf.Sin(dirRad);       // travel direction, root-local
+
+            // ---------- body: bob, lean, jump height
+            float bodyY = 0f, air = 0f;
+            if (walkW > 0f && jw == 0f) bodyY += bodyBob * Mathf.Cos(4f * Mathf.PI * phase) * walkW;
+            if (jw > 0f)
+            {
+                float u = jumpU;
+                float b;
+                if (u < 0.22f) b = -crouchDepth * SStep(u / 0.22f);
+                else if (u < 0.78f) { float k = (u - 0.22f) / 0.56f; b = Mathf.Max(-crouchDepth, -crouchDepth * (1f - SStep(Mathf.Min(1f, k * 3f))) + jumpHeight * 4f * k * (1f - k)); }
+                else b = -crouchDepth * SStep((u - 0.78f) / 0.22f) * 0.9f;
+                bodyY += b; air = b;
+            }
+            body.t.localPosition = body.restPos + lU * bodyY;
+            if (walkW > 0f && bodyLean > 0f)
+            {
+                Quaternion lean = Quaternion.FromToRotation(lU, (lU + d3 * Mathf.Tan(bodyLean * Mathf.Deg2Rad * walkW)).normalized);
+                body.t.localRotation = lean * body.restRot;
+            }
+
+            // ---------- turret aim (computed in the body's frame, so body lean doesn't matter)
+            aimW = Mathf.MoveTowards(aimW, (aimAtTarget && target != null) ? 1f : 0f, dt / 0.25f);
+            float yawGoal = 0f, pitchGoal = 0f;
+            if (aimAtTarget && target != null)
+            {
+                Vector3 tl = body.t.InverseTransformPoint(target.position) - body.t.InverseTransformPoint(tilt.t.position);
+                float ax = Vector3.Dot(tl, lR), ay = Vector3.Dot(tl, lU), az = Vector3.Dot(tl, lF);
+                yawGoal = Mathf.Atan2(ax, az) * Mathf.Rad2Deg;
+                pitchGoal = Mathf.Clamp(Mathf.Atan2(ay, Mathf.Sqrt(ax * ax + az * az)) * Mathf.Rad2Deg, tiltMin, tiltMax);
+            }
+            float sm = 0.08f;
+            yaw = Mathf.SmoothDampAngle(yaw, yawGoal, ref yawVel, sm, turretSpeed);
+            pitch = Mathf.SmoothDamp(pitch, pitchGoal, ref pitchVel, sm, turretSpeed);
+            pan.t.localRotation = Quaternion.AngleAxis(yaw * yawSign, lU) * pan.restRot;
+            tilt.t.localRotation = Quaternion.AngleAxis(pitch * tiltSign, lR) * tilt.restRot;
+
+            // ---------- legs (two-bone IK to feet that follow the gait / jump)
+            Vector3 pole = transform.TransformDirection(lU);
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3 off = Vector3.zero;
+                if (jw > 0f)
+                {
+                    float lift = Mathf.Max(0f, air - 0.17f);
+                    float tk = Mathf.Min(1f, lift / 0.12f) * 0.35f;
+                    Vector3 hip = transform.InverseTransformPoint(upper[i].t.position);       // current hip (body moved)
+                    Vector3 toHip = Vector3.ProjectOnPlane(hip - ankleRest[i], lU);
+                    off = lU * lift + toHip * (tk * 0.5f);
+                }
+                else if (walkW > 0f)
+                {
+                    float ph = Mathf.Repeat(phase + (i >= 2 ? 0.5f : 0f), 1f);
+                    float s, y = 0f;
+                    if (ph < Duty) s = 0.5f - ph / Duty;
+                    else { float q = (ph - Duty) / (1f - Duty); s = -0.5f + SStep(q); y = stepHeight * Mathf.Sin(Mathf.PI * q); }
+                    off = (d3 * (strideLength * s) + lU * y) * walkW;
+                }
+                Vector3 targetWorld = transform.TransformPoint(ankleRest[i] + off);
+                TwoBoneIK(upper[i].t, lower[i].t, foot[i].t, targetWorld, pole);
+                foot[i].t.rotation = transform.rotation * footRestRoot[i];
+            }
+
+            if (moveWhileWalking && walkW > 0f && jw == 0f)
+                transform.position += transform.TransformDirection(d3) * (WalkSpeed * walkW * dt);
+        }
+
+        // for your own scripts / UI buttons
+        public void SetWalking(bool v) { walking = v; }
+        public void SetAiming(bool v) { aimAtTarget = v; }
+        public void SetJump(bool v) { jump = v; }
+    }
+}
