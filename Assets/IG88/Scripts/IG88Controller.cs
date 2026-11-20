@@ -67,6 +67,17 @@ public class IG88Controller : MonoBehaviour
     [Tooltip("The droid only fires when its gun points at the player within this many degrees.")]
     [Range(5f, 90f)] public float maxFireAngle = 35f;
     public bool drawGizmos = true;
+    
+    [Header("Target")]
+    [SerializeField] private LayerMask playerLayer;
+
+    [Header("AgentSettings")]
+    [SerializeField] private float stopDistance = 2f;
+    [SerializeField] private float detectionDistance = 20f;
+    [SerializeField] private float patrolDistance = 10f;
+    [SerializeField] private float detectionInterval = 2f;
+    
+    private EnemyMoveSystem movement;
 
     // ------------------------------------------------------------------ rig
 
@@ -158,219 +169,22 @@ public class IG88Controller : MonoBehaviour
         get { return Vector3.ProjectOnPlane(transform.TransformDirection(restForwardLocal), transform.up).normalized; }
     }
 
-    void Awake() { DetectRig(); EnsureHitCollider(); }
-
-    void OnDestroy()
+    void Awake()
     {
-        if (gm != null) gm.Unregister(this);
-        for (int i = 0; i < glowMats.Count; i++)
-            if (glowMats[i].m != null) Destroy(glowMats[i].m);
+        DetectRig();
+        movement = new EnemyMoveSystem(transform);
     }
 
-    /// <summary>Called by the GameManager right after spawning.</summary>
-    public void Init(GameManager manager, IG88Route patrolRoute, int startNode)
+    private void Update()
     {
-        gm = manager;
-        route = patrolRoute;
-        mode = Mode.Patrol;
-        returning = false;
-        fromNode = startNode;
-        toNode = -1;
-        prevNode = -1;
-        goalNode = -1;
-        blockedTime = 0f;
-        blockLimit = Random.Range(2f, 4f);
-        backoffTimer = 0f;
-        aimAtTarget = false;
-        walking = false;
-        IsDead = false;
-        health = gm.DroidHealth;
-        alertBlend = 0f;
-        hasSeenPlayer = false;
-        seesPlayer = false;
-        clearShot = false;
-        hasStopPoint = false;
-        lastSightTime = -999f;
-        homeHops = gm.RouteHops(route, startNode);   // my home = the waypoint I spawned on
-        transform.position = gm.NodePos(startNode);
-        SetupGlow();
-        UpdateLook(0f);
-        ready = true;
+        movement.Tick(walking && moveWhileWalking, moveSpeed, playerLayer, stopDistance,
+            detectionDistance, patrolDistance, detectionInterval);
     }
 
-    // ------------------------------------------------------------------ light + glow material
-
-    static bool IsGlowMaterial(Material m, Material src)
+    private void OnDisable()
     {
-        if (m == src) return true;
-        string n = m.name;
-        if (n.EndsWith(" (Instance)")) n = n.Substring(0, n.Length - 11);
-        return n == src.name;
+        movement?.Stop();
     }
-
-    static string FindName(Material m, string[] names)
-    {
-        for (int i = 0; i < names.Length; i++)
-            if (m.HasProperty(names[i])) return names[i];
-        return null;
-    }
-
-    // custom shaders (Shader Graph): any colour property with "emi" or "glow" in its name
-    static string FindColorByKeyword(Material m, string a, string b)
-    {
-        Shader sh = m.shader;
-        for (int i = 0; i < sh.GetPropertyCount(); i++)
-        {
-            if (sh.GetPropertyType(i) != UnityEngine.Rendering.ShaderPropertyType.Color) continue;
-            string n = sh.GetPropertyName(i);
-            string low = n.ToLowerInvariant();
-            if (low.Contains(a) || low.Contains(b)) return n;
-        }
-        return null;
-    }
-
-    static string DescribeShader(Material m)
-    {
-        Shader sh = m.shader;
-        System.Text.StringBuilder sb = new System.Text.StringBuilder();
-        sb.Append("shader '").Append(sh.name).Append("', colour properties: ");
-        for (int i = 0; i < sh.GetPropertyCount(); i++)
-            if (sh.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Color) sb.Append(sh.GetPropertyName(i)).Append(' ');
-        sb.Append(", texture properties: ");
-        for (int i = 0; i < sh.GetPropertyCount(); i++)
-            if (sh.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Texture) sb.Append(sh.GetPropertyName(i)).Append(' ');
-        return sb.ToString();
-    }
-
-    // Every droid gets its own copy of the glow material (the asset is never changed).
-    // The glow colour is NOT taken from what the material looks like now: green and red are set explicitly
-    // (colours from the GameManager). Texture maps are turned into brightness masks, so the tint decides the colour.
-    void SetupGlow()
-    {
-        glowMats.Clear();
-        Material src = gm.DroidGlowMaterial;
-        if (src == null) return;
-
-        string emisColorName = FindName(src, EmissionColorNames) ?? FindColorByKeyword(src, "emi", "glow");
-        if (emisColorName == null)
-        {
-            Debug.LogWarning("IG88Controller: can't find an emission colour on the glow material. " + DescribeShader(src), this);
-            return;
-        }
-        string emisMapName = FindName(src, EmissionMapNames);
-        string baseColorName = FindName(src, BaseColorNames);
-        string baseMapName = FindName(src, BaseMapNames);
-
-        Renderer[] rs = GetComponentsInChildren<Renderer>(true);
-        for (int r = 0; r < rs.Length; r++)
-        {
-            Material[] shared = rs[r].sharedMaterials;
-            bool changed = false;
-            for (int i = 0; i < shared.Length; i++)
-            {
-                if (shared[i] == null || !IsGlowMaterial(shared[i], src)) continue;
-
-                GlowMat g = new GlowMat();
-                g.m = new Material(shared[i]);
-                g.m.name = src.name + " (droid)";
-                g.m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
-
-                // emission: strength from the original, colour from the GameManager, map -> brightness mask
-                g.emisColorId = Shader.PropertyToID(emisColorName);
-                Texture eMap = emisMapName != null ? g.m.GetTexture(emisMapName) : null;
-                g.emisIntensity = g.m.GetColor(g.emisColorId).maxColorComponent;
-                if (g.emisIntensity < 0.01f) g.emisIntensity = (eMap != null) ? 1f : 2f;
-                if (eMap != null) g.m.SetTexture(emisMapName, GetMaskMap(eMap));
-
-                // base colour / base map: same idea, so no red-orange surface colour is left over
-                if (baseColorName != null)
-                {
-                    g.baseColorId = Shader.PropertyToID(baseColorName);
-                    Color b = g.m.GetColor(g.baseColorId);
-                    g.baseBrightness = b.maxColorComponent;
-                    g.baseAlpha = b.a;
-                    Texture bMap = baseMapName != null ? g.m.GetTexture(baseMapName) : null;
-                    if (bMap != null) g.m.SetTexture(baseMapName, GetMaskMap(bMap));
-                }
-
-                shared[i] = g.m;
-                glowMats.Add(g);
-                changed = true;
-            }
-            if (changed) rs[r].sharedMaterials = shared;
-        }
-
-        if (!glowLogged)
-        {
-            glowLogged = true;
-            Debug.Log("[IG88] glow: " + glowMats.Count + " material slot(s) found. Using emission colour '" + emisColorName + "', emission map '" +
-                      (emisMapName ?? "none") + "', base colour '" + (baseColorName ?? "none") + "'. " + DescribeShader(src));
-        }
-        if (glowMats.Count == 0)
-            Debug.LogWarning("IG88Controller: the Droid Glow Material from the GameManager is not used by any renderer of this droid, so its glow can't change.", this);
-    }
-
-    // Brightness mask of a texture: every pixel becomes grey with the value (max of R,G,B) of the original.
-    // A green glow map, a red one or a white one all give the same mask, the tint colour then decides the colour.
-    // Made once and shared by all droids. Works with non-readable textures (goes through the GPU).
-    static Texture GetMaskMap(Texture src)
-    {
-        Texture2D cached;
-        if (maskMapCache.TryGetValue(src, out cached) && cached != null) return cached;
-
-        int w = Mathf.Clamp(src.width, 4, 1024), h = Mathf.Clamp(src.height, 4, 1024);
-        RenderTexture rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
-        RenderTexture prev = RenderTexture.active;
-        Graphics.Blit(src, rt);
-        RenderTexture.active = rt;
-        Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false, true);
-        tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
-        RenderTexture.active = prev;
-        RenderTexture.ReleaseTemporary(rt);
-
-        Color32[] px = tex.GetPixels32();
-        for (int i = 0; i < px.Length; i++)
-        {
-            byte v = (byte)Mathf.Max(px[i].r, Mathf.Max(px[i].g, px[i].b));
-            px[i].r = v; px[i].g = v; px[i].b = v;
-        }
-        tex.SetPixels32(px);
-        tex.Apply();
-        tex.name = src.name + " (mask)";
-        maskMapCache[src] = tex;
-        return tex;
-    }
-
-    // light stays on at a constant intensity, only the colour changes; the glow material does the same green -> red
-    void UpdateLook(float dt)
-    {
-        float goal = (mode == Mode.Chase) ? 1f : 0f;
-        alertBlend = (dt <= 0f) ? goal : Mathf.MoveTowards(alertBlend, goal, dt / LookFadeTime);
-        Color state = Color.Lerp(gm.DroidGreen, gm.DroidRed, alertBlend);
-
-        if (chaseLight != null)
-        {
-            chaseLight.enabled = true;
-            chaseLight.intensity = gm.DroidLightIntensity;
-            chaseLight.color = state;
-        }
-
-        for (int i = 0; i < glowMats.Count; i++)
-        {
-            GlowMat g = glowMats[i];
-            if (g.m == null) continue;
-            float ei = g.emisIntensity;
-            g.m.SetColor(g.emisColorId, new Color(state.r * ei, state.g * ei, state.b * ei, 1f));
-            if (g.baseColorId >= 0)
-            {
-                float bb = g.baseBrightness;
-                g.m.SetColor(g.baseColorId, new Color(state.r * bb, state.g * bb, state.b * bb, g.baseAlpha));
-            }
-            g.m.EnableKeyword("_EMISSION");   // Unity: the keyword must be enabled AFTER the colour is set
-        }
-    }
-
-    // ------------------------------------------------------------------ rig detection (unchanged logic)
 
     RigBone Grab(Dictionary<string, Transform> map, string key, List<string> missing)
     {
@@ -1093,7 +907,7 @@ public class IG88Controller : MonoBehaviour
         sh.rotation = Quaternion.Slerp(before, aimed, w);
     }
 
-    void OnDrawGizmosSelected()
+    void OnDrawGizmos()
     {
         if (!drawGizmos || !rigReady) return;
 
@@ -1108,7 +922,14 @@ public class IG88Controller : MonoBehaviour
 
         if (target == null || gunTip == null) return;
         Gizmos.color = aimAtTarget ? Color.red : Color.gray;
-        Gizmos.DrawLine(gunTip.t.position, aimPoint);
+        Gizmos.DrawLine(gunTip.t.position, target.position);
+        
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(transform.position, stopDistance);
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, patrolDistance);
+        Gizmos.color = Color.green;
+        Gizmos.DrawWireSphere(transform.position, detectionDistance);
     }
 
     // Handy for your own scripts / UI buttons:
