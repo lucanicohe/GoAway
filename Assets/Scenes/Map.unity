@@ -13412,17 +13412,17 @@ MonoBehaviour:
   - target: {fileID: 1087770124}
     temperature: 18
   - target: {fileID: 1263564597}
-    temperature: 18
+    temperature: 0
   - target: {fileID: 1563082828}
-    temperature: 18
+    temperature: 0
   - target: {fileID: 617870804}
     temperature: 32
   - target: {fileID: 111401899}
-    temperature: 18
+    temperature: 0
   - target: {fileID: 380098363}
     temperature: 18
   - target: {fileID: 1263564597}
-    temperature: 18
+    temperature: 0
   - target: {fileID: 1476977597}
     temperature: 18
   - target: {fileID: 0}
@@ -24430,9 +24430,9 @@ MonoBehaviour:
   walkSpeed: 1
   walkStepsPerSecond: 1.1
   turnSpeed: 240
-  droidLightIntensity: 0.1
-  droidGreen: {r: 0.25, g: 1, b: 0.35, a: 1}
-  droidRed: {r: 1, g: 0.15, b: 0.15, a: 1}
+  droidLightIntensity: 0
+  droidGreen: {r: 0, g: 0, b: 0, a: 1}
+  droidRed: {r: 0, g: 0, b: 0, a: 1}
   droidGlowMaterial: {fileID: 2100000, guid: b49a3f2433d3d4c6fab4dbede89b7049, type: 2}
   patrolZoneSize: 2
   minDroidDistance: 6
