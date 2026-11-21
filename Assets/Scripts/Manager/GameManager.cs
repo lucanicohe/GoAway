@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Serialization;
 using TMPro;
+using FlatheadRobotKit;
 
 [DefaultExecutionOrder(-50)] // runs before most player scripts
 public class GameManager : MonoBehaviour
@@ -10,6 +11,9 @@ public class GameManager : MonoBehaviour
     // One droid per waypoint is the physical maximum: there are 11 waypoints (G1-G6, R1-R5) and droids
     // can spawn and patrol on all of them.
     public const int MaxDroids = 11;
+
+    // One Flathead per waypoint is the physical maximum: 20 waypoints (W1-W13 on the walls, T1-T7 on the ceiling).
+    public const int MaxFlatheads = 20;
 
     [Header("Ammo")]
     [SerializeField] private int maxAmmo = 30;
@@ -50,9 +54,9 @@ public class GameManager : MonoBehaviour
     // =====================================================================
 
     [Header("IG-88 Master Switches (work live while playing)")]
-    [Tooltip("Droids will NOT chase, target or shoot the player. They keep patrolling normally.")]
+    [Tooltip("Droids (IG-88 AND Flatheads) will NOT chase, target or shoot the player. They keep patrolling normally.")]
     [SerializeField] private bool droidOff = false;
-    [Tooltip("Droids stand completely still and do nothing (no patrol, no chase, no aiming, no shooting). Overrides Droid Off.")]
+    [Tooltip("Droids (IG-88 AND Flatheads) stand completely still and do nothing (no patrol, no chase, no aiming, no shooting). Overrides Droid Off.")]
     [SerializeField] private bool droidPatrolOff = false;
 
     [Header("IG-88 Spawning")]
@@ -156,11 +160,88 @@ public class GameManager : MonoBehaviour
     [Header("IG-88 Debug")]
     [SerializeField] private bool drawWaypointGizmos = true;
 
+    // =====================================================================
+    //  FLATHEAD ROBOTS (four-legged turrets on the walls and the ceiling)
+    //  They use the same detection / shooting settings as the droids above (Sight Range, Detection Radius, Lose Sight Time,
+    //  Droid Damage, Droid Fire Rate, Droid Accuracy, Droid Bolt Speed, Droid Off, Droid Patrol Off).
+    // =====================================================================
+
+    [Header("Flathead Spawning")]
+    [Tooltip("Drag your Flathead prefab here (it must have the FlatheadController on its root). The GameManager adds the FlatheadEnemy script by itself.")]
+    [SerializeField] private FlatheadController flatheadPrefab;
+    [Tooltip("How many Flatheads to spawn. Max = 20 (one per waypoint: W1-W13 on the walls, T1-T7 on the ceiling). They start spread out over free waypoints.")]
+    [Range(0, MaxFlatheads)]
+    [SerializeField] private int flatheadCount = 4;
+
+    [Header("Flathead Health")]
+    [Tooltip("Health of every Flathead. A body hit takes 'Damage Per Player Hit Body' away, a hit on the turret takes 'Damage Per Player Hit Head' away.")]
+    [Min(0.01f)]
+    [SerializeField] private float flatheadHealth = 3f;
+    [Tooltip("A hit this close (metres) to the turret pivot counts as a headshot (unless the prefab has a separate collider on the turret).")]
+    [Range(0.05f, 0.6f)]
+    [SerializeField] private float flatheadTurretHitRadius = 0.25f;
+
+    [Header("Flathead Movement")]
+    [Tooltip("Walk animation speed (full step cycles per second). The walking speed in m/s is Stride Length x Steps Per Second / 0.55, so the feet never slide.")]
+    [Range(0.3f, 4f)]
+    [SerializeField] private float flatheadStepsPerSecond = 1.4f;
+    [Tooltip("Length of one step in metres.")]
+    [Range(0.05f, 0.5f)]
+    [SerializeField] private float flatheadStrideLength = 0.30f;
+    [Tooltip("Metres per second while flying through the air on a jump (blue connection). Longer jumps take longer.")]
+    [Min(0.5f)]
+    [SerializeField] private float flatheadJumpSpeed = 3f;
+    [Tooltip("How far the jump arcs out into the room (metres).")]
+    [Range(0f, 2f)]
+    [SerializeField] private float flatheadJumpArc = 0.5f;
+    [Tooltip("Every Flathead patrols around the waypoint it spawned on. It only goes to waypoints at most this many connections away from its home.")]
+    [Range(1, 10)]
+    [SerializeField] private int flatheadPatrolZoneSize = 4;
+    [Tooltip("Flatheads never get closer than this to each other. One that would break this waits until the other one moves.")]
+    [SerializeField] private float minFlatheadDistance = 0.5f;
+
+    [Header("Flathead Room Layout")]
+    [Tooltip("World direction of the TOP of your waypoint drawing (where the arrows at the top of the picture point). Default (0,0,1) = the top of the drawing is world +Z, the right of the drawing is world +X. " +
+             "Change it if your room is turned: the walls the robots stand on are worked out from it.")]
+    [SerializeField] private Vector3 flatheadPictureUp = new Vector3(0f, 0f, 1f);
+    [Tooltip("Metres the Flathead is lifted off the wall / ceiling, away from it. 0 = the Flathead's pivot (feet) sits exactly on the waypoint.")]
+    [SerializeField] private float flatheadSurfaceOffset = 0f;
+
+    [Header("Flathead Waypoints - WALLS (empty objects on the wall surface, as in the drawing)")]
+    [SerializeField] private Transform w1;
+    [SerializeField] private Transform w2;
+    [SerializeField] private Transform w3;
+    [SerializeField] private Transform w4;
+    [SerializeField] private Transform w5;
+    [SerializeField] private Transform w6;
+    [SerializeField] private Transform w7;
+    [SerializeField] private Transform w8;
+    [SerializeField] private Transform w9;
+    [SerializeField] private Transform w10;
+    [SerializeField] private Transform w11;
+    [SerializeField] private Transform w12;
+    [SerializeField] private Transform w13;
+
+    [Header("Flathead Waypoints - CEILING (empty objects on the ceiling surface, robot hangs upside down)")]
+    [SerializeField] private Transform t1;
+    [SerializeField] private Transform t2;
+    [SerializeField] private Transform t3;
+    [SerializeField] private Transform t4;
+    [SerializeField] private Transform t5;
+    [SerializeField] private Transform t6;
+    [SerializeField] private Transform t7;
+
+    [Header("Flathead Debug")]
+    [Tooltip("Scene view: red line = WALK connection, blue line = JUMP connection, green stick at every waypoint = direction away from the surface (the robot's back, its feet are on the surface).")]
+    [SerializeField] private bool drawFlatheadGizmos = true;
+
     // The waypoint graph (all connections, routes, shortest paths, closest point on the track) lives in EnemyMoveSystem.
     // This GameManager only keeps the 11 waypoint objects you drag in above and hands them over in BuildGraph().
     float nextGraphRebuild;
 
     readonly List<IG88Controller> droids = new List<IG88Controller>();
+    readonly List<FlatheadEnemy> flatheads = new List<FlatheadEnemy>();
+    Transform flatheadAimTarget;   // sits on the centre of the player: the Flatheads' turrets aim at it
     Transform player;
     float nextPlayerSearch;
 
@@ -208,6 +289,16 @@ public class GameManager : MonoBehaviour
     public float MinDroidDistance => minDroidDistance;
     public int PatrolZoneSize => patrolZoneSize;
 
+    // ---------- public read-only values used by the Flatheads ----------
+    public float FlatheadHealth => flatheadHealth;
+    public float FlatheadTurretHitRadius => flatheadTurretHitRadius;
+    public float FlatheadStepsPerSecond => flatheadStepsPerSecond;
+    public float FlatheadStrideLength => flatheadStrideLength;
+    public float FlatheadJumpSpeed => flatheadJumpSpeed;
+    public float FlatheadJumpArc => flatheadJumpArc;
+    public int FlatheadPatrolZone => flatheadPatrolZoneSize;
+    public Transform FlatheadAimTarget => flatheadAimTarget;
+
     /// <summary>True while the player is moving (position changes), false once he stands still.</summary>
     public bool PlayerMoving => Time.time - lastPlayerMoveTime < PlayerMovingGrace;
 
@@ -251,6 +342,7 @@ public class GameManager : MonoBehaviour
     private void OnValidate()
     {
         droidCount = Mathf.Clamp(droidCount, 0, MaxDroids);
+        flatheadCount = Mathf.Clamp(flatheadCount, 0, MaxFlatheads);
     }
 
     private void Awake()
@@ -271,6 +363,7 @@ public class GameManager : MonoBehaviour
             FixSwayRecoilOrder();
 
         BuildGraph();
+        BuildFlatheadGraph();
     }
 
     private void Start()
@@ -290,6 +383,7 @@ public class GameManager : MonoBehaviour
 
         BuildDroidPools();
         SpawnDroids();
+        SpawnFlatheads();
     }
 
     private void OnEnable()
@@ -312,6 +406,15 @@ public class GameManager : MonoBehaviour
         {
             bool headshot = droid.IsHeadHit(info.collider, info.point);
             droid.TakeDamage(headshot ? damagePerPlayerHitHead : damagePerPlayerHitBody, info.point, info.direction);
+            return;
+        }
+
+        // same for the Flathead robots: a hit on the turret counts as a headshot
+        FlatheadEnemy flathead = info.collider.GetComponentInParent<FlatheadEnemy>();
+        if (flathead != null)
+        {
+            bool turretHit = flathead.IsTurretHit(info.collider, info.point);
+            flathead.TakeDamage(turretHit ? damagePerPlayerHitHead : damagePerPlayerHitBody, info.point, info.direction);
         }
     }
 
@@ -321,6 +424,7 @@ public class GameManager : MonoBehaviour
             blaster.Fired -= OnWeaponFired;
         if (droidBoltRoot != null) Destroy(droidBoltRoot.gameObject);
         if (droidSparkRoot != null) Destroy(droidSparkRoot.gameObject);
+        if (flatheadAimTarget != null) Destroy(flatheadAimTarget.gameObject);
     }
 
     private void Update()
@@ -337,11 +441,15 @@ public class GameManager : MonoBehaviour
         }
 
         // keep path lengths correct if you move waypoints while playing
-        if (EnemyMoveSystem.Ready && Time.time >= nextGraphRebuild)
+        if (Time.time >= nextGraphRebuild)
         {
             nextGraphRebuild = Time.time + 1f;
-            EnemyMoveSystem.RebuildDistances();
+            if (EnemyMoveSystem.Ready) EnemyMoveSystem.RebuildDistances();
+            if (FlatheadMoveSystem.Ready) FlatheadMoveSystem.Configure(flatheadPictureUp, flatheadSurfaceOffset);
         }
+
+        // the Flatheads' turrets aim at this object: keep it on the centre of the player
+        if (flatheadAimTarget != null && Player != null) flatheadAimTarget.position = PlayerAimPoint;
     }
 
     // Runs before the droids (execution order -50). The droids ask 'PlayerMoving'.
@@ -749,6 +857,7 @@ public class GameManager : MonoBehaviour
             Collider c = losHits[i].collider;
             if (c == null) continue;
             if (c.GetComponentInParent<IG88Controller>() != null) continue;   // droid bodies are ignored by the bolt too
+            if (c.GetComponentInParent<FlatheadEnemy>() != null) continue;    // Flathead bodies as well
             if (losHits[i].distance < bestDist) { bestDist = losHits[i].distance; first = c; }
         }
 
@@ -831,11 +940,180 @@ public class GameManager : MonoBehaviour
     }
 
     // =====================================================================
+    //  FLATHEADS: waypoints, spawning, collision
+    // =====================================================================
+
+    // hands the 20 waypoint objects to the FlatheadMoveSystem, which owns all Flathead waypoints, connections and paths
+    private void BuildFlatheadGraph()
+    {
+        List<string> missing = new List<string>();
+        Transform[] waypoints = { w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, t1, t2, t3, t4, t5, t6, t7 };
+        if (!FlatheadMoveSystem.SetWaypoints(waypoints, missing, flatheadPictureUp, flatheadSurfaceOffset) && flatheadCount > 0 && flatheadPrefab != null)
+            Debug.LogError("[GameManager] Flathead waypoints not assigned: " + string.Join(", ", missing.ToArray()) +
+                           ". No Flatheads will spawn until all 20 are dragged in.", this);
+    }
+
+    [ContextMenu("Respawn Flatheads")]
+    public void SpawnFlatheads()
+    {
+        ClearFlatheads();
+        if (flatheadPrefab == null)
+        {
+            if (flatheadCount > 0) Debug.LogWarning("[GameManager] No Flathead prefab assigned - no Flatheads spawned.", this);
+            return;
+        }
+        if (!FlatheadMoveSystem.Ready) return;
+
+        if (flatheadAimTarget == null)
+            flatheadAimTarget = new GameObject("Flathead Aim Target").transform;
+
+        int count = Mathf.Clamp(flatheadCount, 0, MaxFlatheads);
+        for (int i = 0; i < count; i++)
+        {
+            int node = PickFreeFlatheadNode();
+            if (node < 0)
+            {
+                Debug.LogWarning("[GameManager] No free Flathead waypoint left (waypoints closer than 'Min Flathead Distance'?). Spawned " + flatheads.Count + " Flatheads.", this);
+                break;
+            }
+
+            FlatheadController inst = Instantiate(flatheadPrefab, FlatheadMoveSystem.NodePos(node), flatheadPrefab.transform.rotation);
+            inst.name = "Flathead_" + (i + 1).ToString("00");
+            FlatheadEnemy enemy = inst.GetComponent<FlatheadEnemy>();
+            if (enemy == null) enemy = inst.gameObject.AddComponent<FlatheadEnemy>();
+            flatheads.Add(enemy);
+            enemy.Init(this, node);   // puts it on the waypoint, in the pose of that waypoint (wall or ceiling)
+        }
+    }
+
+    private void ClearFlatheads()
+    {
+        for (int i = flatheads.Count - 1; i >= 0; i--)
+            if (flatheads[i] != null) Destroy(flatheads[i].gameObject);
+        flatheads.Clear();
+    }
+
+    // picks the free waypoint that is farthest from the Flatheads already placed, so they start spread out
+    private int PickFreeFlatheadNode()
+    {
+        int best = -1;
+        float bestScore = -1f;
+        for (int n = 0; n < FlatheadMoveSystem.NodeTotal; n++)
+        {
+            Vector3 p = FlatheadMoveSystem.NodePos(n);
+            float nearest = float.MaxValue;
+            bool taken = false;
+            for (int d = 0; d < flatheads.Count; d++)
+            {
+                if (flatheads[d] == null) continue;
+                float dd = Vector3.Distance(flatheads[d].transform.position, p);
+                if (dd < minFlatheadDistance) { taken = true; break; }
+                nearest = Mathf.Min(nearest, dd);
+            }
+            if (taken) continue;
+
+            float score = (nearest == float.MaxValue ? 0f : nearest) + Random.value * 0.5f;
+            if (score > bestScore) { bestScore = score; best = n; }
+        }
+        return best;
+    }
+
+    public void UnregisterFlathead(FlatheadEnemy f) { flatheads.Remove(f); }
+
+    /// <summary>True if another Flathead is standing close to that waypoint.</summary>
+    public bool FlatheadNodeCrowded(int node, FlatheadEnemy who)
+    {
+        Vector3 p = FlatheadMoveSystem.NodePos(node);
+        for (int i = 0; i < flatheads.Count; i++)
+        {
+            FlatheadEnemy o = flatheads[i];
+            if (o == null || o == who) continue;
+            if (Vector3.Distance(o.transform.position, p) < minFlatheadDistance * 2.5f) return true;
+            if (o.HasLanding && Vector3.Distance(o.LandingPos, p) < minFlatheadDistance * 2.5f) return true;
+        }
+        return false;
+    }
+
+    /// <summary>True if another Flathead stands on (or within 'Min Flathead Distance' of) that spot, so a jump must not land there.</summary>
+    public bool FlatheadSpotTaken(Vector3 pos, FlatheadEnemy who)
+    {
+        for (int i = 0; i < flatheads.Count; i++)
+        {
+            FlatheadEnemy o = flatheads[i];
+            if (o == null || o == who) continue;
+            if (Vector3.Distance(o.transform.position, pos) < minFlatheadDistance) return true;
+            if (o.HasLanding && Vector3.Distance(o.LandingPos, pos) < minFlatheadDistance) return true;   // somebody is about to land there
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True if moving 'who' to newPos would bring it closer than 'Min Flathead Distance' to another Flathead.
+    /// Moving AWAY from a close one is always allowed, so they never get stuck inside each other.
+    /// </summary>
+    public bool WouldCollideFlathead(FlatheadEnemy who, Vector3 newPos)
+    {
+        Vector3 cur = who.transform.position;
+        for (int i = 0; i < flatheads.Count; i++)
+        {
+            FlatheadEnemy o = flatheads[i];
+            if (o == null || o == who) continue;
+            Vector3 op = o.transform.position;
+            float now = Vector3.Distance(cur, op);
+            float after = Vector3.Distance(newPos, op);
+            if (after < minFlatheadDistance && after < now - 0.0001f) return true;
+
+            // a robot that is in the air also blocks the spot it is going to land on
+            if (o.HasLanding)
+            {
+                Vector3 lp = o.LandingPos;
+                float lnow = Vector3.Distance(cur, lp);
+                float lafter = Vector3.Distance(newPos, lp);
+                if (lafter < minFlatheadDistance && lafter < lnow - 0.0001f) return true;
+            }
+        }
+        return false;
+    }
+
+    // Scene view: red = walk connection, blue = jump connection, green stick = the robot's "up" (away from the surface its feet stand on)
+    private void DrawFlatheadGizmos()
+    {
+        if (!drawFlatheadGizmos) return;
+        Transform[] n = { w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, t1, t2, t3, t4, t5, t6, t7 };
+
+        foreach (FlatheadMoveSystem.Edge e in FlatheadMoveSystem.Edges)
+        {
+            if (n[e.a] == null || n[e.b] == null) continue;
+            Gizmos.color = e.kind == FlatheadEdgeKind.Walk ? Color.red : new Color(0.25f, 0.45f, 1f);
+            Gizmos.DrawLine(n[e.a].position, n[e.b].position);
+        }
+
+        for (int i = 0; i < n.Length; i++)
+        {
+            if (n[i] == null) continue;
+            Gizmos.color = i >= FlatheadMoveSystem.T1 ? Color.cyan : Color.white;
+            Gizmos.DrawSphere(n[i].position, 0.15f);
+
+            Vector3 up, fwd;
+            FlatheadMoveSystem.PreviewFrame(i, flatheadPictureUp, out up, out fwd);
+            Vector3 stand = n[i].position + up * flatheadSurfaceOffset;
+            Gizmos.color = Color.green;
+            Gizmos.DrawLine(stand, stand + up * 0.6f);        // robot's back (feet are at the waypoint)
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawLine(stand, stand + fwd * 0.3f);       // direction it faces
+#if UNITY_EDITOR
+            UnityEditor.Handles.Label(n[i].position + Vector3.up * 0.35f, FlatheadMoveSystem.NodeNames[i]);
+#endif
+        }
+    }
+
+    // =====================================================================
     //  IG-88: Scene view gizmos (green / red / yellow connections + names)
     // =====================================================================
 
     private void OnDrawGizmos()
     {
+        DrawFlatheadGizmos();
         if (!drawWaypointGizmos) return;
         Transform[] n = { g1, g2, g3, g4, g5, g6, r1, r2, r3, r4, r5 };
 

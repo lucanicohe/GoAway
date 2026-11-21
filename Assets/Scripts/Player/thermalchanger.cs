@@ -108,10 +108,19 @@ public class ThermalChanger : MonoBehaviour
     [SerializeField] private float boltTemperature = 100f;
     [SerializeField] private float sparkTemperature = 80f;
 
+    [Header("Flathead Robots (spawned by the GameManager)")]
+    [Tooltip("Temperature of the Flathead's legs and body in thermal mode. Applies to every Flathead the GameManager spawns.")]
+    [SerializeField] private float flatheadTemperature = 50f;
+    [Tooltip("Temperature of the Flathead's turret + gun. Set it equal to the body temperature if you don't want a hotter turret.")]
+    [SerializeField] private float flatheadTurretTemperature = 80f;
+    [Tooltip("While thermal mode is on, how often (seconds) to look for Flatheads that spawned after it was switched on.")]
+    [SerializeField] private float flatheadScanInterval = 0.5f;
+
     [Header("Objects with Custom Temperature")]
     [SerializeField] private List<ThermalObject> thermalObjects = new List<ThermalObject>();
 
     private bool thermalMode = false;
+    private float nextFlatheadScanTime;
     private Coroutine postExposureRoutine;
 
     private readonly Dictionary<Renderer, Material[]> originalMaterials = new();
@@ -171,6 +180,32 @@ public class ThermalChanger : MonoBehaviour
         }
 
         UpdateBarrelHeat();
+
+        // Flatheads that spawned while thermal mode was already on (e.g. "Respawn Flatheads") get the thermal look too
+        if (thermalMode && Time.time >= nextFlatheadScanTime)
+        {
+            nextFlatheadScanTime = Time.time + Mathf.Max(0.1f, flatheadScanInterval);
+            ApplyThermalToNewFlatheads();
+        }
+    }
+
+    // ---------------------------------------------------------------- Flatheads spawned after thermal mode was switched on
+
+    private void ApplyThermalToNewFlatheads()
+    {
+        FlatheadEnemy[] robots = FindObjectsByType<FlatheadEnemy>(FindObjectsSortMode.None);
+
+        foreach (FlatheadEnemy robot in robots)
+        {
+            if (robot == null)
+                continue;
+
+            foreach (Renderer rend in robot.GetComponentsInChildren<Renderer>(true))
+            {
+                if (rend != null && !originalMaterials.ContainsKey(rend))
+                    ApplyThermalToRenderer(rend);
+            }
+        }
     }
 
     // ---------------------------------------------------------------- Blaster: barrel + gun body heat
@@ -269,39 +304,7 @@ public class ThermalChanger : MonoBehaviour
             if (rend == null)
                 continue;
 
-            Material[] original = rend.sharedMaterials;
-            originalMaterials[rend] = original;
-
-            float temperature = GetTemperature(rend);
-
-            Material[] newMaterials = new Material[original.Length];
-
-            for (int i = 0; i < original.Length; i++)
-            {
-                Material instance = new Material(thermalMaterial);
-
-                if (instance.HasProperty(TempProperty))
-                {
-                    instance.SetFloat(TempProperty, temperature);
-                }
-                else
-                {
-                    Debug.LogError(
-                        $"Thermal material missing '_temp' property: {rend.name}"
-                    );
-                }
-
-                newMaterials[i] = instance;
-                thermalInstances.Add(instance);
-
-                if (barrel != null && IsInside(rend, barrel))
-                    barrelInstances.Add(instance);
-
-                if (gunBody != null && IsInside(rend, gunBody))
-                    gunBodyInstances.Add(instance);
-            }
-
-            rend.sharedMaterials = newMaterials;
+            ApplyThermalToRenderer(rend);
         }
 
         // Thermal mode effects
@@ -337,6 +340,43 @@ public class ThermalChanger : MonoBehaviour
         Debug.Log($"THERMAL MODE: {originalMaterials.Count} renderers updated.");
     }
 
+    private void ApplyThermalToRenderer(Renderer rend)
+    {
+        Material[] original = rend.sharedMaterials;
+        originalMaterials[rend] = original;
+
+        float temperature = GetTemperature(rend);
+
+        Material[] newMaterials = new Material[original.Length];
+
+        for (int i = 0; i < original.Length; i++)
+        {
+            Material instance = new Material(thermalMaterial);
+
+            if (instance.HasProperty(TempProperty))
+            {
+                instance.SetFloat(TempProperty, temperature);
+            }
+            else
+            {
+                Debug.LogError(
+                    $"Thermal material missing '_temp' property: {rend.name}"
+                );
+            }
+
+            newMaterials[i] = instance;
+            thermalInstances.Add(instance);
+
+            if (barrel != null && IsInside(rend, barrel))
+                barrelInstances.Add(instance);
+
+            if (gunBody != null && IsInside(rend, gunBody))
+                gunBodyInstances.Add(instance);
+        }
+
+        rend.sharedMaterials = newMaterials;
+    }
+
     private float GetTemperature(Renderer rend)
     {
         if (laserPointer != null && IsInside(rend, laserPointer))
@@ -362,6 +402,18 @@ public class ThermalChanger : MonoBehaviour
         {
             if (entry.target != null && IsInside(rend, entry.target))
                 return entry.temperature;
+        }
+
+        // Flathead robots (spawned at runtime by the GameManager, so they can't be dragged into the list above)
+        FlatheadEnemy flathead = rend.GetComponentInParent<FlatheadEnemy>();
+        if (flathead != null)
+        {
+            Transform turret = flathead.Ctrl != null ? flathead.Ctrl.TurretBone : null;
+
+            if (turret != null && (rend.transform == turret || rend.transform.IsChildOf(turret)))
+                return flatheadTurretTemperature;
+
+            return flatheadTemperature;
         }
 
         return Random.Range(0f, randomTemperatureAmount);
