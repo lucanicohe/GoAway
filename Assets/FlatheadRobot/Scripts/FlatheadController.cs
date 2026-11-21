@@ -74,6 +74,28 @@ namespace FlatheadRobotKit
         public float WalkSpeed { get { return strideLength * stepsPerSecond / Duty; } }
         public bool IsJumping { get { return jumpU >= 0f; } }
 
+        // ---- read-only values used by the FlatheadEnemy (the enemy brain that drives this controller)
+        /// <summary>0..1 while a jump is playing (0-0.22 crouch, 0.22-0.78 in the air, 0.78-1 landing), -1 otherwise.</summary>
+        public float JumpProgress { get { return jumpU; } }
+        /// <summary>True once the rig (bones) has been found.</summary>
+        public bool IsReady { get { return ready; } }
+        /// <summary>Tip of the gun barrel (world).</summary>
+        public Vector3 MuzzlePosition { get { return muzzle != null ? muzzle.t.position : transform.position; } }
+        /// <summary>Pivot of the gun (world): where the turret "looks" from.</summary>
+        public Vector3 TurretPosition { get { return tilt != null ? tilt.t.position : transform.position; } }
+        /// <summary>Direction the gun barrel points (world).</summary>
+        public Vector3 GunDirection
+        {
+            get
+            {
+                if (muzzle == null || tilt == null) return transform.forward;
+                Vector3 d = muzzle.t.position - tilt.t.position;
+                return d.sqrMagnitude > 1e-8f ? d.normalized : transform.forward;
+            }
+        }
+        /// <summary>The turret bone that pans (Gun_Pan).</summary>
+        public Transform TurretBone { get { return pan != null ? pan.t : null; } }
+
         void Awake() { DetectRig(); }
 
         List<RigBone> allList;
