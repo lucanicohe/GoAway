@@ -30,6 +30,13 @@ public class BlasterWeapon : MonoBehaviour
     [SerializeField] private BlasterMuzzleFlash muzzleFlash;
     [SerializeField] private BlasterRecoil recoil;
 
+
+
+    [Header("Blaster Audio")]
+    [SerializeField] private AudioSource blasterAudio;
+    [SerializeField] private AudioClip blasterSound;
+    [SerializeField, Range(0f, 1f)] private float shotVolume = 1f;
+
     [Header("Firing")]
     [SerializeField] private bool automatic = true;
     [Tooltip("Shots per second.")]
@@ -114,6 +121,8 @@ public class BlasterWeapon : MonoBehaviour
     private int nextBurst;
     private float nextFireTime;
     private readonly RaycastHit[] hitBuffer = new RaycastHit[24];
+
+
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
@@ -248,11 +257,15 @@ public class BlasterWeapon : MonoBehaviour
                 Debug.Log("[Blaster] shot fired, nothing in range", this);
         }
 
-        // 4. flash, recoil, event
+        // 4. flash, recoil, audio, event
         if (muzzleFlash != null)
             muzzleFlash.Fire();
+
         if (recoil != null)
             recoil.Kick();
+
+        if (blasterAudio != null && blasterSound != null)
+            blasterAudio.PlayOneShot(blasterSound, shotVolume);
 
         ShotCount++;
         if (Fired != null)
