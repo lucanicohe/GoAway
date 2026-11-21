@@ -156,58 +156,8 @@ public class GameManager : MonoBehaviour
     [Header("IG-88 Debug")]
     [SerializeField] private bool drawWaypointGizmos = true;
 
-    // ----- graph definition (copied from dots.jpg) -----
-    const int G1 = 0, G2 = 1, G3 = 2, G4 = 3, G5 = 4, G6 = 5, R1 = 6, R2 = 7, R3 = 8, R4 = 9, R5 = 10;
-    static readonly string[] NodeNames = { "G1", "G2", "G3", "G4", "G5", "G6", "R1", "R2", "R3", "R4", "R5" };
-
-    struct Edge
-    {
-        public int a, b;
-        public IG88EdgeKind kind;
-        public Edge(int a, int b, IG88EdgeKind kind) { this.a = a; this.b = b; this.kind = kind; }
-    }
-
-    static readonly Edge[] Edges =
-    {
-        // green (patrol 1)
-        new Edge(G6, G5, IG88EdgeKind.Green),
-        new Edge(G5, G4, IG88EdgeKind.Green),
-        new Edge(G4, G3, IG88EdgeKind.Green),
-        new Edge(G3, G2, IG88EdgeKind.Green),
-        new Edge(G5, G2, IG88EdgeKind.Green),
-        new Edge(G2, G1, IG88EdgeKind.Green),
-        // red (patrol 2) - G3 is the shared point
-        new Edge(R5, R4, IG88EdgeKind.Red),
-        new Edge(R4, R2, IG88EdgeKind.Red),
-        new Edge(R2, R1, IG88EdgeKind.Red),
-        new Edge(R2, R3, IG88EdgeKind.Red),
-        new Edge(R3, G3, IG88EdgeKind.Red),
-        new Edge(G3, R4, IG88EdgeKind.Red),
-        // yellow (patrolled by BOTH routes, and used for chasing)
-        new Edge(R5, G6, IG88EdgeKind.Yellow),
-        new Edge(R1, G1, IG88EdgeKind.Yellow),
-    };
-
-    static readonly int[] GreenNodes = { G1, G2, G3, G4, G5, G6 };
-    static readonly int[] RedNodes = { R1, R2, R3, R4, R5, G3 };
-
-    // Waypoints where droids may NOT spawn or patrol (chase-only). Empty now: droids spawn and patrol on
-    // G1 and R1 like on every other waypoint. To block a waypoint again, list it here, for example { G1, R1 }.
-    static readonly int[] NoPatrolNodes = { };
-
-    /// <summary>True for waypoints where droids may not spawn or patrol (they are chase-only).</summary>
-    public bool IsNoPatrolNode(int node)
-    {
-        for (int i = 0; i < NoPatrolNodes.Length; i++)
-            if (NoPatrolNodes[i] == node) return true;
-        return false;
-    }
-
-    Transform[] nodes;
-    List<IG88Link>[] links;
-    float[,] dist;
-    int[,] next;
-    bool graphReady;
+    // The waypoint graph (all connections, routes, shortest paths, closest point on the track) lives in EnemyMoveSystem.
+    // This GameManager only keeps the 11 waypoint objects you drag in above and hands them over in BuildGraph().
     float nextGraphRebuild;
 
     readonly List<IG88Controller> droids = new List<IG88Controller>();
@@ -387,10 +337,10 @@ public class GameManager : MonoBehaviour
         }
 
         // keep path lengths correct if you move waypoints while playing
-        if (graphReady && Time.time >= nextGraphRebuild)
+        if (EnemyMoveSystem.Ready && Time.time >= nextGraphRebuild)
         {
             nextGraphRebuild = Time.time + 1f;
-            RebuildDistances();
+            EnemyMoveSystem.RebuildDistances();
         }
     }
 
@@ -567,144 +517,17 @@ public class GameManager : MonoBehaviour
     }
 
     // =====================================================================
-    //  IG-88: waypoint graph
+    //  IG-88: waypoints (the graph itself lives in EnemyMoveSystem)
     // =====================================================================
 
+    // hands the 11 waypoint objects to the EnemyMoveSystem, which owns all waypoints, connections and paths
     private void BuildGraph()
     {
-        nodes = new Transform[] { g1, g2, g3, g4, g5, g6, r1, r2, r3, r4, r5 };
-
         List<string> missing = new List<string>();
-        for (int i = 0; i < nodes.Length; i++)
-            if (nodes[i] == null) missing.Add(NodeNames[i]);
-
-        graphReady = missing.Count == 0;
-        if (!graphReady)
-        {
+        Transform[] waypoints = { g1, g2, g3, g4, g5, g6, r1, r2, r3, r4, r5 };
+        if (!EnemyMoveSystem.SetWaypoints(waypoints, missing))
             Debug.LogError("[GameManager] Waypoints not assigned: " + string.Join(", ", missing.ToArray()) +
                            ". No IG-88 droids will spawn until all 11 are dragged in.", this);
-            return;
-        }
-
-        links = new List<IG88Link>[nodes.Length];
-        for (int i = 0; i < links.Length; i++) links[i] = new List<IG88Link>();
-        foreach (Edge e in Edges)
-        {
-            links[e.a].Add(new IG88Link { node = e.b, kind = e.kind });
-            links[e.b].Add(new IG88Link { node = e.a, kind = e.kind });
-        }
-
-        dist = new float[nodes.Length, nodes.Length];
-        next = new int[nodes.Length, nodes.Length];
-        RebuildDistances();
-    }
-
-    // Floyd-Warshall over ALL connections (green + red + yellow) - used for chasing / returning to patrol
-    private void RebuildDistances()
-    {
-        int n = nodes.Length;
-        const float INF = 1e9f;
-        for (int i = 0; i < n; i++)
-            for (int j = 0; j < n; j++)
-            {
-                dist[i, j] = i == j ? 0f : INF;
-                next[i, j] = i == j ? i : -1;
-            }
-
-        foreach (Edge e in Edges)
-        {
-            float w = Vector3.Distance(nodes[e.a].position, nodes[e.b].position);
-            dist[e.a, e.b] = dist[e.b, e.a] = w;
-            next[e.a, e.b] = e.b;
-            next[e.b, e.a] = e.a;
-        }
-
-        for (int k = 0; k < n; k++)
-            for (int i = 0; i < n; i++)
-                for (int j = 0; j < n; j++)
-                    if (dist[i, k] + dist[k, j] < dist[i, j])
-                    {
-                        dist[i, j] = dist[i, k] + dist[k, j];
-                        next[i, j] = next[i, k];
-                    }
-    }
-
-    public Vector3 NodePos(int i) { return nodes[i].position; }
-    public float PathDist(int a, int b) { return dist[a, b]; }
-    public int NextHop(int from, int goal) { return next[from, goal]; }
-    public List<IG88Link> Links(int node) { return links[node]; }
-    public int[] RouteNodes(IG88Route r) { return r == IG88Route.Green ? GreenNodes : RedNodes; }
-
-    public bool NodeInRoute(int node, IG88Route r)
-    {
-        int[] list = RouteNodes(r);
-        for (int i = 0; i < list.Length; i++) if (list[i] == node) return true;
-        return false;
-    }
-
-    /// <summary>True if a connection of this colour belongs to the patrol network of a route: its OWN colour plus the YELLOW ones.</summary>
-    public static bool PatrolEdgeMatches(IG88Route r, IG88EdgeKind kind)
-    {
-        if (kind == IG88EdgeKind.Yellow) return true;
-        return r == IG88Route.Green ? kind == IG88EdgeKind.Green : kind == IG88EdgeKind.Red;
-    }
-
-    /// <summary>True if the waypoint has at least one connection a droid of that route patrols (own colour or yellow).</summary>
-    public bool NodeOnPatrolNetwork(int node, IG88Route r)
-    {
-        List<IG88Link> ls = links[node];
-        for (int i = 0; i < ls.Count; i++)
-            if (PatrolEdgeMatches(r, ls[i].kind)) return true;
-        return false;
-    }
-
-    public int NodeCount { get { return nodes != null ? nodes.Length : 0; } }
-
-    public IG88EdgeKind EdgeKindOf(int a, int b)
-    {
-        foreach (Edge e in Edges)
-            if ((e.a == a && e.b == b) || (e.a == b && e.b == a)) return e.kind;
-        return IG88EdgeKind.Yellow;
-    }
-
-    public int NearestNode(Vector3 p)
-    {
-        int best = -1;
-        float bestD = float.MaxValue;
-        for (int i = 0; i < nodes.Length; i++)
-        {
-            float d = (nodes[i].position - p).sqrMagnitude;
-            if (d < bestD) { bestD = d; best = i; }
-        }
-        return best;
-    }
-
-    /// <summary>
-    /// The closest point on the whole waypoint track (green + red + yellow connections) to a world position.
-    /// The point lies on the connection a-b, t = 0 is at node a, t = 1 is at node b.
-    /// </summary>
-    public bool ClosestTrackPoint(Vector3 p, out int a, out int b, out float t, out Vector3 point)
-    {
-        a = -1; b = -1; t = 0f; point = p;
-        if (!graphReady) return false;
-
-        float best = float.MaxValue;
-        for (int i = 0; i < Edges.Length; i++)
-        {
-            Vector3 pa = nodes[Edges[i].a].position;
-            Vector3 pb = nodes[Edges[i].b].position;
-            Vector3 ab = pb - pa;
-            float len2 = ab.sqrMagnitude;
-            float tt = len2 > 1e-8f ? Mathf.Clamp01(Vector3.Dot(p - pa, ab) / len2) : 0f;
-            Vector3 q = pa + ab * tt;
-            float d = (q - p).sqrMagnitude;
-            if (d < best)
-            {
-                best = d;
-                a = Edges[i].a; b = Edges[i].b; t = tt; point = q;
-            }
-        }
-        return a >= 0;
     }
 
     // =====================================================================
@@ -716,13 +539,13 @@ public class GameManager : MonoBehaviour
     {
         ClearDroids();
         if (ig88Prefab == null) { Debug.LogWarning("[GameManager] No IG88 prefab assigned - no droids spawned.", this); return; }
-        if (!graphReady) return;
+        if (!EnemyMoveSystem.Ready) return;
 
         int count = Mathf.Clamp(droidCount, 0, MaxDroids);
 
         // Guaranteed start spots: every start one droid stands on G2 (green) and one on R2 or R3 (red, picked at random).
         // With only 1 droid, one of those two spots is used (at random).
-        int[] forcedNodes = { G2, Random.value < 0.5f ? R2 : R3 };
+        int[] forcedNodes = { EnemyMoveSystem.G2, Random.value < 0.5f ? EnemyMoveSystem.R2 : EnemyMoveSystem.R3 };
         IG88Route[] forcedRoutes = { IG88Route.Green, IG88Route.Red };
         int firstForced = (count == 1 && Random.value < 0.5f) ? 1 : 0;
 
@@ -736,7 +559,7 @@ public class GameManager : MonoBehaviour
             {
                 int n = forcedNodes[fi];
                 if (!NodeFree(n) && forcedRoutes[fi] == IG88Route.Red)
-                    n = (n == R2) ? R3 : R2;                 // the other red spot
+                    n = (n == EnemyMoveSystem.R2) ? EnemyMoveSystem.R3 : EnemyMoveSystem.R2;                 // the other red spot
                 if (NodeFree(n)) { node = n; route = forcedRoutes[fi]; }
             }
             if (node < 0)
@@ -752,7 +575,7 @@ public class GameManager : MonoBehaviour
                 break;
             }
 
-            IG88Controller d = Instantiate(ig88Prefab, NodePos(node), ig88Prefab.transform.rotation);
+            IG88Controller d = Instantiate(ig88Prefab, EnemyMoveSystem.NodePos(node), ig88Prefab.transform.rotation);
             d.name = "IG88_" + (i + 1).ToString("00");
             droids.Add(d);
             d.Init(this, route, node);
@@ -769,7 +592,7 @@ public class GameManager : MonoBehaviour
     // true if no droid stands within 'Min Droid Distance' of that waypoint
     private bool NodeFree(int node)
     {
-        Vector3 p = NodePos(node);
+        Vector3 p = EnemyMoveSystem.NodePos(node);
         for (int d = 0; d < droids.Count; d++)
         {
             if (droids[d] == null) continue;
@@ -781,13 +604,13 @@ public class GameManager : MonoBehaviour
     // picks the free waypoint that is farthest from the droids already placed, so droids start spread out
     private int PickFreeNode(IG88Route route)
     {
-        int[] list = RouteNodes(route);
+        int[] list = EnemyMoveSystem.RouteNodes(route);
         int best = -1;
         float bestScore = -1f;
         for (int i = 0; i < list.Length; i++)
         {
-            if (IsNoPatrolNode(list[i])) continue;
-            Vector3 p = NodePos(list[i]);
+            if (EnemyMoveSystem.IsNoPatrolNode(list[i])) continue;
+            Vector3 p = EnemyMoveSystem.NodePos(list[i]);
             float nearest = float.MaxValue;
             bool taken = false;
             for (int d = 0; d < droids.Count; d++)
@@ -806,33 +629,10 @@ public class GameManager : MonoBehaviour
         return best;
     }
 
-    /// <summary>Number of connections from 'start' to every waypoint, walking only along the patrol network of one route (its own colour + the yellow connections).</summary>
-    public int[] RouteHops(IG88Route r, int start)
-    {
-        int[] hops = new int[nodes.Length];
-        for (int i = 0; i < hops.Length; i++) hops[i] = 999;
-        Queue<int> q = new Queue<int>();
-        hops[start] = 0;
-        q.Enqueue(start);
-        while (q.Count > 0)
-        {
-            int n = q.Dequeue();
-            List<IG88Link> ls = links[n];
-            for (int i = 0; i < ls.Count; i++)
-            {
-                bool ok = PatrolEdgeMatches(r, ls[i].kind);
-                if (!ok || hops[ls[i].node] != 999) continue;
-                hops[ls[i].node] = hops[n] + 1;
-                q.Enqueue(ls[i].node);
-            }
-        }
-        return hops;
-    }
-
     /// <summary>True if another droid is standing close to that waypoint.</summary>
     public bool NodeCrowded(int node, IG88Controller who)
     {
-        Vector3 p = NodePos(node);
+        Vector3 p = EnemyMoveSystem.NodePos(node);
         for (int i = 0; i < droids.Count; i++)
         {
             IG88Controller o = droids[i];
@@ -1039,7 +839,7 @@ public class GameManager : MonoBehaviour
         if (!drawWaypointGizmos) return;
         Transform[] n = { g1, g2, g3, g4, g5, g6, r1, r2, r3, r4, r5 };
 
-        foreach (Edge e in Edges)
+        foreach (EnemyMoveSystem.Edge e in EnemyMoveSystem.Edges)
         {
             if (n[e.a] == null || n[e.b] == null) continue;
             Gizmos.color = e.kind == IG88EdgeKind.Green ? Color.green :
@@ -1053,7 +853,7 @@ public class GameManager : MonoBehaviour
             Gizmos.color = Color.white;
             Gizmos.DrawSphere(n[i].position, 0.15f);
 #if UNITY_EDITOR
-            UnityEditor.Handles.Label(n[i].position + Vector3.up * 0.35f, NodeNames[i]);
+            UnityEditor.Handles.Label(n[i].position + Vector3.up * 0.35f, EnemyMoveSystem.NodeNames[i]);
 #endif
         }
     }

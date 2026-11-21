@@ -6,20 +6,16 @@ public enum IG88EdgeKind { Green, Red, Yellow }
 public struct IG88Link { public int node; public IG88EdgeKind kind; }
 
 /// <summary>
-/// IG-88 droid controller. Put this on the droid's root object (the prefab already has it).
-/// The GameManager spawns the droid and calls Init(). From then on the droid:
-///  - PATROLS its route at walk speed, along the drawn connections of its own colour AND the yellow ones.
-///  - FIRST DETECTION is by SIGHT only (clear line of sight, up to the Sight Range). The Detection Radius does nothing yet.
-///    Once it has seen the player and then lost sight, it may also sense him inside the Detection Radius (no sight needed),
-///    but only for 'Lose Sight Time' seconds after it LAST SAW him. After that it forgets him and must SEE him again.
-///  - CHASE: walks along the waypoint track (all connections) to the closest point of the track to the player, and stops there.
-///    It shoots red bolts ONLY while it can see him (never into walls). As soon as it has a clear shot it stops and fires;
-///    it only walks again when the player moves.
-///  - Never gets closer than 1 m to the player.
-///  - Goes back to its patrol when it has not SEEN the player for 'Lose Sight Time' seconds.
-///  - Never touches another droid: it waits until the other droid moves away.
-///  - Has health. Headshots do more damage than body hits (see the GameManager). At 0 every rigged part breaks loose and falls to the ground.
-/// Procedural walk animation, no Animator needed.
+/// IG-88 droid BODY. Put this on the droid's root object (the prefab already has it).
+/// The GameManager spawns the droid and calls Init(). This script handles everything about the droid's body:
+///  - ANIMATION: procedural walk cycle (it walks while the EnemyMoveSystem moves the droid) and aiming: waist, chest, head and gun arm
+///    turn onto the player while he is being chased. No Animator needed.
+///  - SHOOTING: red bolts, only while the droid sees the player and the bolt has a free path (never into walls), no firing delay.
+///  - GLOW + LIGHT: green = calm, red = chase.
+///  - HEALTH + DEATH: headshots do more damage than body hits (see the GameManager). At 0 every rigged part breaks loose and falls to the ground.
+/// WHERE the droid walks and WHEN it detects / chases the player is decided by the EnemyMoveSystem: waypoints only, no NavMesh
+/// (patrol on its own route colour + the yellow connections, sight-only first detection, stop at the closest point of the track to the
+/// player, stop and fire when it has a clear shot, never touch another droid).
 /// </summary>
 [DisallowMultipleComponent]
 [AddComponentMenu("IG88/IG88 Controller")]
@@ -67,17 +63,6 @@ public class IG88Controller : MonoBehaviour
     [Tooltip("The droid only fires when its gun points at the player within this many degrees.")]
     [Range(5f, 90f)] public float maxFireAngle = 35f;
     public bool drawGizmos = true;
-    
-    [Header("Target")]
-    [SerializeField] private LayerMask playerLayer;
-
-    [Header("AgentSettings")]
-    [SerializeField] private float stopDistance = 2f;
-    [SerializeField] private float detectionDistance = 20f;
-    [SerializeField] private float patrolDistance = 10f;
-    [SerializeField] private float detectionInterval = 2f;
-    
-    private EnemyMoveSystem movement;
 
     // ------------------------------------------------------------------ rig
 
@@ -99,35 +84,13 @@ public class IG88Controller : MonoBehaviour
     float phase, walkWeight, aimWeight, yaw, yawVel;
     float stepsPerSecond = 1.1f;
 
-    // ------------------------------------------------------------------ AI state
-
-    enum Mode { Patrol, Chase }
+    // ------------------------------------------------------------------ state
 
     GameManager gm;
-    IG88Route route;
-    Mode mode = Mode.Patrol;
+    EnemyMoveSystem move;   // waypoint movement + detection of this droid (created in Init)
     bool ready;
+    bool wasChasing;        // to notice the moment a chase starts / ends
 
-    int fromNode = -1;      // node we are on / just left
-    int toNode = -1;        // node we are walking to (-1 = standing on fromNode, need a new target)
-    int prevNode = -1;      // node we came from (patrol: don't turn back unless dead end)
-    int goalNode = -1;      // chase goal or "return to patrol" goal
-    bool returning;         // walking back to the patrol network after a chase
-
-    // chase stop point: the closest point on the waypoint track (any connection) to the player. A chasing droid walks there and stops.
-    bool hasStopPoint;
-    int stopA = -1, stopB = -1;   // the connection the stop point lies on
-    float stopT;                  // 0 = at stopA, 1 = at stopB
-    Vector3 stopPoint;
-
-    float blockedTime;
-    float blockLimit = 3f;
-    float backoffTimer;
-
-    float lastSightTime;    // last moment the droid SAW the player (a chase ends 'Lose Sight Time' seconds after this)
-    bool hasSeenPlayer;     // true from the first sighting until the droid gives up: only then may the Detection Radius be used
-    bool seesPlayer;        // this frame: player within Sight Range and a clear line of sight from the droid's head (updated in UpdateMode)
-    bool clearShot;         // this frame: seesPlayer AND the bolt path from the gun tip to the player is free (updated in UpdateMode)
     float nextFireTime;
     Vector3 aimPoint;       // where the droid aims (centre of the player)
 
@@ -151,17 +114,7 @@ public class IG88Controller : MonoBehaviour
     static readonly Dictionary<Texture, Texture2D> maskMapCache = new Dictionary<Texture, Texture2D>();
     static bool glowLogged;
 
-    // patrol zone
-    int[] homeHops;                                  // connections from my home waypoint, along my own route
-    static readonly List<int> tmp2 = new List<int>();
-
-    const float ReverseMargin = 0.05f;
-    const float GoalHysteresis = 0.75f;
-    const float StopPointHysteresis = 0.25f;   // the stop point only jumps to another spot of the track if that is this much closer to the player
-    const float ArriveEps = 0.02f;             // metres: this close to the stop point = arrived
-    const float CloseDistance = 1f;     // chasing droids walk until they are this close to the player
     const float LookFadeTime = 0.2f;    // green <-> red fade
-    static readonly List<int> tmp = new List<int>();
 
     /// <summary>Direction the droid faces (world space, flattened).</summary>
     public Vector3 RestForward
@@ -169,22 +122,216 @@ public class IG88Controller : MonoBehaviour
         get { return Vector3.ProjectOnPlane(transform.TransformDirection(restForwardLocal), transform.up).normalized; }
     }
 
-    void Awake()
+    /// <summary>Where the droid looks from (the head bone). The EnemyMoveSystem uses it for the line-of-sight test.</summary>
+    public Vector3 EyePosition
     {
-        DetectRig();
-        movement = new EnemyMoveSystem(transform);
+        get { return (rigReady && head != null) ? head.t.position : transform.position + transform.up * 1.5f; }
     }
 
-    private void Update()
+    /// <summary>True when the rig (and so the gun) was found.</summary>
+    public bool HasGun { get { return rigReady && gunTip != null; } }
+
+    /// <summary>Where the bolts start (the gun tip). Only valid when HasGun is true.</summary>
+    public Vector3 GunTipPosition { get { return gunTip.t.position; } }
+
+    void Awake() { DetectRig(); EnsureHitCollider(); }
+
+    void OnDestroy()
     {
-        movement.Tick(walking && moveWhileWalking, moveSpeed, playerLayer, stopDistance,
-            detectionDistance, patrolDistance, detectionInterval);
+        if (gm != null) gm.Unregister(this);
+        for (int i = 0; i < glowMats.Count; i++)
+            if (glowMats[i].m != null) Destroy(glowMats[i].m);
     }
 
-    private void OnDisable()
+    /// <summary>Called by the GameManager right after spawning.</summary>
+    public void Init(GameManager manager, IG88Route patrolRoute, int startNode)
     {
-        movement?.Stop();
+        gm = manager;
+        aimAtTarget = false;
+        walking = false;
+        IsDead = false;
+        health = gm.DroidHealth;
+        alertBlend = 0f;
+        wasChasing = false;
+        move = new EnemyMoveSystem(this, gm, patrolRoute, startNode);   // puts the droid on its start waypoint
+        SetupGlow();
+        UpdateLook(0f);
+        ready = true;
     }
+
+    // ------------------------------------------------------------------ light + glow material
+
+    static bool IsGlowMaterial(Material m, Material src)
+    {
+        if (m == src) return true;
+        string n = m.name;
+        if (n.EndsWith(" (Instance)")) n = n.Substring(0, n.Length - 11);
+        return n == src.name;
+    }
+
+    static string FindName(Material m, string[] names)
+    {
+        for (int i = 0; i < names.Length; i++)
+            if (m.HasProperty(names[i])) return names[i];
+        return null;
+    }
+
+    // custom shaders (Shader Graph): any colour property with "emi" or "glow" in its name
+    static string FindColorByKeyword(Material m, string a, string b)
+    {
+        Shader sh = m.shader;
+        for (int i = 0; i < sh.GetPropertyCount(); i++)
+        {
+            if (sh.GetPropertyType(i) != UnityEngine.Rendering.ShaderPropertyType.Color) continue;
+            string n = sh.GetPropertyName(i);
+            string low = n.ToLowerInvariant();
+            if (low.Contains(a) || low.Contains(b)) return n;
+        }
+        return null;
+    }
+
+    static string DescribeShader(Material m)
+    {
+        Shader sh = m.shader;
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+        sb.Append("shader '").Append(sh.name).Append("', colour properties: ");
+        for (int i = 0; i < sh.GetPropertyCount(); i++)
+            if (sh.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Color) sb.Append(sh.GetPropertyName(i)).Append(' ');
+        sb.Append(", texture properties: ");
+        for (int i = 0; i < sh.GetPropertyCount(); i++)
+            if (sh.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Texture) sb.Append(sh.GetPropertyName(i)).Append(' ');
+        return sb.ToString();
+    }
+
+    // Every droid gets its own copy of the glow material (the asset is never changed).
+    // The glow colour is NOT taken from what the material looks like now: green and red are set explicitly
+    // (colours from the GameManager). Texture maps are turned into brightness masks, so the tint decides the colour.
+    void SetupGlow()
+    {
+        glowMats.Clear();
+        Material src = gm.DroidGlowMaterial;
+        if (src == null) return;
+
+        string emisColorName = FindName(src, EmissionColorNames) ?? FindColorByKeyword(src, "emi", "glow");
+        if (emisColorName == null)
+        {
+            Debug.LogWarning("IG88Controller: can't find an emission colour on the glow material. " + DescribeShader(src), this);
+            return;
+        }
+        string emisMapName = FindName(src, EmissionMapNames);
+        string baseColorName = FindName(src, BaseColorNames);
+        string baseMapName = FindName(src, BaseMapNames);
+
+        Renderer[] rs = GetComponentsInChildren<Renderer>(true);
+        for (int r = 0; r < rs.Length; r++)
+        {
+            Material[] shared = rs[r].sharedMaterials;
+            bool changed = false;
+            for (int i = 0; i < shared.Length; i++)
+            {
+                if (shared[i] == null || !IsGlowMaterial(shared[i], src)) continue;
+
+                GlowMat g = new GlowMat();
+                g.m = new Material(shared[i]);
+                g.m.name = src.name + " (droid)";
+                g.m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+
+                // emission: strength from the original, colour from the GameManager, map -> brightness mask
+                g.emisColorId = Shader.PropertyToID(emisColorName);
+                Texture eMap = emisMapName != null ? g.m.GetTexture(emisMapName) : null;
+                g.emisIntensity = g.m.GetColor(g.emisColorId).maxColorComponent;
+                if (g.emisIntensity < 0.01f) g.emisIntensity = (eMap != null) ? 1f : 2f;
+                if (eMap != null) g.m.SetTexture(emisMapName, GetMaskMap(eMap));
+
+                // base colour / base map: same idea, so no red-orange surface colour is left over
+                if (baseColorName != null)
+                {
+                    g.baseColorId = Shader.PropertyToID(baseColorName);
+                    Color b = g.m.GetColor(g.baseColorId);
+                    g.baseBrightness = b.maxColorComponent;
+                    g.baseAlpha = b.a;
+                    Texture bMap = baseMapName != null ? g.m.GetTexture(baseMapName) : null;
+                    if (bMap != null) g.m.SetTexture(baseMapName, GetMaskMap(bMap));
+                }
+
+                shared[i] = g.m;
+                glowMats.Add(g);
+                changed = true;
+            }
+            if (changed) rs[r].sharedMaterials = shared;
+        }
+
+        if (!glowLogged)
+        {
+            glowLogged = true;
+            Debug.Log("[IG88] glow: " + glowMats.Count + " material slot(s) found. Using emission colour '" + emisColorName + "', emission map '" +
+                      (emisMapName ?? "none") + "', base colour '" + (baseColorName ?? "none") + "'. " + DescribeShader(src));
+        }
+        if (glowMats.Count == 0)
+            Debug.LogWarning("IG88Controller: the Droid Glow Material from the GameManager is not used by any renderer of this droid, so its glow can't change.", this);
+    }
+
+    // Brightness mask of a texture: every pixel becomes grey with the value (max of R,G,B) of the original.
+    // A green glow map, a red one or a white one all give the same mask, the tint colour then decides the colour.
+    // Made once and shared by all droids. Works with non-readable textures (goes through the GPU).
+    static Texture GetMaskMap(Texture src)
+    {
+        Texture2D cached;
+        if (maskMapCache.TryGetValue(src, out cached) && cached != null) return cached;
+
+        int w = Mathf.Clamp(src.width, 4, 1024), h = Mathf.Clamp(src.height, 4, 1024);
+        RenderTexture rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+        RenderTexture prev = RenderTexture.active;
+        Graphics.Blit(src, rt);
+        RenderTexture.active = rt;
+        Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false, true);
+        tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+        RenderTexture.active = prev;
+        RenderTexture.ReleaseTemporary(rt);
+
+        Color32[] px = tex.GetPixels32();
+        for (int i = 0; i < px.Length; i++)
+        {
+            byte v = (byte)Mathf.Max(px[i].r, Mathf.Max(px[i].g, px[i].b));
+            px[i].r = v; px[i].g = v; px[i].b = v;
+        }
+        tex.SetPixels32(px);
+        tex.Apply();
+        tex.name = src.name + " (mask)";
+        maskMapCache[src] = tex;
+        return tex;
+    }
+
+    // light stays on at a constant intensity, only the colour changes; the glow material does the same green -> red
+    void UpdateLook(float dt)
+    {
+        float goal = (move != null && move.Chasing) ? 1f : 0f;
+        alertBlend = (dt <= 0f) ? goal : Mathf.MoveTowards(alertBlend, goal, dt / LookFadeTime);
+        Color state = Color.Lerp(gm.DroidGreen, gm.DroidRed, alertBlend);
+
+        if (chaseLight != null)
+        {
+            chaseLight.enabled = true;
+            chaseLight.intensity = gm.DroidLightIntensity;
+            chaseLight.color = state;
+        }
+
+        for (int i = 0; i < glowMats.Count; i++)
+        {
+            GlowMat g = glowMats[i];
+            if (g.m == null) continue;
+            float ei = g.emisIntensity;
+            g.m.SetColor(g.emisColorId, new Color(state.r * ei, state.g * ei, state.b * ei, 1f));
+            if (g.baseColorId >= 0)
+            {
+                float bb = g.baseBrightness;
+                g.m.SetColor(g.baseColorId, new Color(state.r * bb, state.g * bb, state.b * bb, g.baseAlpha));
+            }
+            g.m.EnableKeyword("_EMISSION");   // Unity: the keyword must be enabled AFTER the colour is set
+        }
+    }
+
+    // ------------------------------------------------------------------ rig detection (unchanged logic)
 
     RigBone Grab(Dictionary<string, Transform> map, string key, List<string> missing)
     {
@@ -404,382 +551,46 @@ public class IG88Controller : MonoBehaviour
         }
     }
 
-    // ------------------------------------------------------------------ AI (movement happens in Update)
+    // ------------------------------------------------------------------ update: the EnemyMoveSystem decides, the body animates + shoots
 
     void Update()
     {
-        if (!ready || gm == null) return;
+        if (!ready || gm == null || move == null) return;
         float dt = Time.deltaTime;
 
-        UpdateMode();
+        // detection + waypoint movement. Returns true when the droid really moved this frame -> drives the walk animation.
+        walking = move.Tick(dt);
+
+        // a chase starts / ends: aim at the player (or not), and the first shot is allowed right away
+        bool chasing = move.Chasing;
+        if (chasing != wasChasing)
+        {
+            wasChasing = chasing;
+            aimAtTarget = chasing;
+            if (chasing) nextFireTime = Time.time;   // no delay: the gun only has to swing onto the player
+        }
 
         Transform p = gm.Player;
+        if (chasing && p != null) target = p;        // target = object tagged Player, found automatically
         if (p != null) aimPoint = gm.PlayerAimPoint;
 
-        if (gm.DroidPatrolOff)
-        {
-            walking = false;                    // Droid Patrol Off = stand still, do nothing
-        }
-        else
-        {
-            walking = Think(dt);
-            UpdateFiring();
-        }
+        if (!gm.DroidPatrolOff) UpdateFiring();      // Droid Patrol Off = stand still, do nothing
 
         stepsPerSecond = gm.WalkSteps;
         UpdateLook(dt);
-    }
-
-    void UpdateMode()
-    {
-        Transform p = gm.Player;
-
-        // Droid Off or Droid Patrol Off: never chase / target / shoot the player
-        bool canChase = !gm.DroidOff && !gm.DroidPatrolOff && p != null;
-
-        // DETECTION (is the droid aware of the player right now?)
-        //  - FIRST detection is by SIGHT only: a clear line of sight closer than the Sight Range. The Detection Radius does nothing yet.
-        //  - After the droid has seen the player (and maybe lost sight) it may ALSO sense him inside the Detection Radius,
-        //    but only until 'Lose Sight Time' seconds after it LAST SAW him. After that it forgets him (see below) and needs sight again.
-        // 'seesPlayer' / 'clearShot' are worked out once per frame and are ALSO what the stopping and shooting use.
-        seesPlayer = false;
-        clearShot = false;
-        bool aware = false;
-        if (canChase)
-        {
-            float d = Vector3.Distance(transform.position, p.position);
-            seesPlayer = d < gm.SightRange && CanSeePlayer(p);
-            if (seesPlayer)
-            {
-                hasSeenPlayer = true;
-                lastSightTime = Time.time;
-                // clear shot = it sees him AND the bolt would hit him (free path from the gun tip, not only from the head)
-                clearShot = rigReady && gunTip != null && gm.HasClearShot(gunTip.t.position, gm.PlayerAimPoint);
-            }
-            bool radiusAllowed = hasSeenPlayer && Time.time <= lastSightTime + gm.LoseSightTime;
-            aware = seesPlayer || (radiusAllowed && d < gm.DetectionRadius);
-        }
-        else
-        {
-            hasSeenPlayer = false;
-        }
-
-        if (mode == Mode.Patrol && aware)
-        {
-            mode = Mode.Chase;
-            returning = false;
-            goalNode = -1;
-            hasStopPoint = false;
-            blockedTime = 0f;
-            backoffTimer = 0f;
-            aimAtTarget = true;
-            nextFireTime = Time.time;   // no delay: the first shot is allowed right away (the gun only has to swing onto the player)
-        }
-        else if (mode == Mode.Chase && (!canChase || Time.time > lastSightTime + gm.LoseSightTime))
-        {
-            // player gone (or droids switched off) / not SEEN for 'Lose Sight Time' seconds: forget him, back to patrol.
-            // From now on the Detection Radius is off again until the droid SEES him.
-            mode = Mode.Patrol;
-            aimAtTarget = false;
-            hasSeenPlayer = false;
-            hasStopPoint = false;
-            BeginReturnToPatrol();
-        }
-
-        if (mode == Mode.Chase && p != null) target = p; // target = object tagged Player, found automatically
-    }
-
-    /// <summary>
-    /// True if there is a clear line of sight from the droid's head to the centre of the player
-    /// (walls and other solid objects block it, other droids don't). Same test the droid uses to decide it can shoot.
-    /// </summary>
-    bool CanSeePlayer(Transform p)
-    {
-        if (p == null) return false;
-        Vector3 eye = (rigReady && head != null) ? head.t.position : transform.position + transform.up * 1.5f;
-        return gm.HasClearShot(eye, gm.PlayerAimPoint);
-    }
-
-    // my patrol network = connections of my own colour + the yellow ones
-    bool Matches(IG88EdgeKind kind)
-    {
-        return GameManager.PatrolEdgeMatches(route, kind);
-    }
-
-    void BeginReturnToPatrol()
-    {
-        if (toNode >= 0) returning = !Matches(gm.EdgeKindOf(fromNode, toNode));
-        else returning = !gm.NodeOnPatrolNetwork(fromNode, route);
-
-        if (returning)
-        {
-            goalNode = NearestRouteNode();
-            if (goalNode < 0) returning = false;
-        }
-        else if (toNode >= 0 && gm.IsNoPatrolNode(toNode))
-        {
-            // chase ended while walking along my own route toward G1 / R1: turn around instead of walking on to it
-            Reverse();
-        }
-    }
-
-    // path length from where I am (standing on fromNode, or somewhere on the connection fromNode-toNode) to a node
-    float CostToNode(int n)
-    {
-        if (toNode >= 0)
-        {
-            Vector3 pos = transform.position;
-            float viaTo = Vector3.Distance(pos, gm.NodePos(toNode)) + gm.PathDist(toNode, n);
-            float viaFrom = Vector3.Distance(pos, gm.NodePos(fromNode)) + gm.PathDist(fromNode, n);
-            return Mathf.Min(viaTo, viaFrom);
-        }
-        return gm.PathDist(fromNode, n);
-    }
-
-    // nearest node of my patrol network (own colour + yellow), measured along the connections
-    int NearestRouteNode()
-    {
-        int count = gm.NodeCount;
-        int best = -1;
-        float bestCost = float.MaxValue;
-        for (int n = 0; n < count; n++)
-        {
-            if (gm.IsNoPatrolNode(n)) continue;                  // never "return to patrol" onto a blocked waypoint
-            if (!gm.NodeOnPatrolNetwork(n, route)) continue;
-            float cost = CostToNode(n);
-            if (cost < bestCost) { bestCost = cost; best = n; }
-        }
-        return best;
-    }
-
-    // Chase target = the closest point on the waypoint track to the player (it can lie in the middle of a connection).
-    // 'goalNode' = the end of that connection that is cheaper to reach first; the last bit is walked along the connection itself.
-    void UpdateChaseGoal(Transform player)
-    {
-        if (player == null) return;
-
-        int a, b; float t; Vector3 pt;
-        if (!gm.ClosestTrackPoint(player.position, out a, out b, out t, out pt)) return;
-
-        if (hasStopPoint) stopPoint = Vector3.Lerp(gm.NodePos(stopA), gm.NodePos(stopB), stopT);   // follows waypoints that move while playing
-        if (!hasStopPoint ||
-            Vector3.Distance(player.position, pt) + StopPointHysteresis < Vector3.Distance(player.position, stopPoint))
-        {
-            // the player moved: a new spot of the track is clearly closer to him (hysteresis stops flip-flopping between two spots)
-            hasStopPoint = true;
-            stopA = a; stopB = b; stopT = t; stopPoint = pt;
-        }
-
-        float costA = CostToNode(stopA) + Vector3.Distance(gm.NodePos(stopA), stopPoint);
-        float costB = CostToNode(stopB) + Vector3.Distance(gm.NodePos(stopB), stopPoint);
-        int best = costA <= costB ? stopA : stopB;
-        if (goalNode != stopA && goalNode != stopB)
-        {
-            goalNode = best;
-        }
-        else if (best != goalNode)
-        {
-            float cur = goalNode == stopA ? costA : costB;
-            float cand = best == stopA ? costA : costB;
-            if (cand + GoalHysteresis < cur) goalNode = best;
-        }
-    }
-
-    // true while I walk on the connection that holds the stop point
-    bool IsOnStopEdge()
-    {
-        if (mode != Mode.Chase || !hasStopPoint || toNode < 0) return false;
-        return (fromNode == stopA && toNode == stopB) || (fromNode == stopB && toNode == stopA);
-    }
-
-    // standing on one end of the stop connection: the node at its other end (walk along it to the stop point), or -1 if the stop point is right here
-    int FinalLegTarget()
-    {
-        if (!hasStopPoint) return -1;
-        int other = fromNode == stopA ? stopB : (fromNode == stopB ? stopA : -1);
-        if (other < 0) return -1;
-        if (Vector3.Distance(gm.NodePos(fromNode), stopPoint) <= ArriveEps) return -1;
-        return other;
-    }
-
-    // standing on fromNode: which node do we walk to next? (-1 = stay)
-    int ChooseNext()
-    {
-        if (mode == Mode.Chase)
-        {
-            if (goalNode < 0) return -1;
-            if (goalNode == fromNode) return FinalLegTarget();   // on the end of the stop connection: walk along it to the stop point
-            return gm.NextHop(fromNode, goalNode);
-        }
-        if (returning)
-        {
-            if (goalNode < 0 || goalNode == fromNode) return -1;
-            return gm.NextHop(fromNode, goalNode);
-        }
-
-        // patrol: random walk over the connections of MY route only
-        tmp.Clear();
-        List<IG88Link> links = gm.Links(fromNode);
-        for (int i = 0; i < links.Count; i++)
-            if (Matches(links[i].kind) && !gm.IsNoPatrolNode(links[i].node)) tmp.Add(links[i].node);   // G1 / R1: chase only
-        if (tmp.Count == 0) return -1;
-
-        // 1) stay in my own patrol zone (a few waypoints around my home). Outside of it (e.g. after a chase) head back toward home.
-        tmp2.Clear();
-        for (int i = 0; i < tmp.Count; i++)
-            if (homeHops[tmp[i]] <= gm.PatrolZoneSize) tmp2.Add(tmp[i]);
-        if (tmp2.Count == 0)
-        {
-            int bestHops = int.MaxValue;
-            for (int i = 0; i < tmp.Count; i++) bestHops = Mathf.Min(bestHops, homeHops[tmp[i]]);
-            for (int i = 0; i < tmp.Count; i++)
-                if (homeHops[tmp[i]] == bestHops) tmp2.Add(tmp[i]);
-        }
-
-        // 2) don't walk into a waypoint where another droid stands or waits, if there is another way
-        if (tmp2.Count > 1)
-        {
-            tmp.Clear();
-            for (int i = 0; i < tmp2.Count; i++)
-                if (!gm.NodeCrowded(tmp2[i], this)) tmp.Add(tmp2[i]);
-            if (tmp.Count > 0) { tmp2.Clear(); tmp2.AddRange(tmp); }
-        }
-
-        // 3) no turning back unless it's a dead end
-        if (tmp2.Count > 1) tmp2.Remove(prevNode);
-        return tmp2[Random.Range(0, tmp2.Count)];
-    }
-
-    void Reverse()
-    {
-        int t = fromNode; fromNode = toNode; toNode = t;
-        if (mode == Mode.Chase || returning) backoffTimer = 1.5f; // don't instantly turn around again
-    }
-
-    /// <summary>Robotic turn: rotates at a constant speed. Returns true when facing the direction.</summary>
-    bool FaceDirection(Vector3 dir, float dt)
-    {
-        Vector3 up = transform.up;
-        Vector3 flat = Vector3.ProjectOnPlane(dir, up);
-        if (flat.sqrMagnitude < 1e-6f) return true;
-        float ang = Vector3.SignedAngle(RestForward, flat, up);
-        float maxStep = gm.TurnSpeed * dt;
-        float step = Mathf.Clamp(ang, -maxStep, maxStep);
-        transform.rotation = Quaternion.AngleAxis(step, up) * transform.rotation;
-        return Mathf.Abs(ang - step) < 4f;
-    }
-
-    // not walking: while chasing, keep facing the player
-    bool Idle(float dt)
-    {
-        Transform p = gm.Player;
-        if (mode == Mode.Chase && p != null) FaceDirection(p.position - transform.position, dt);
-        return false;
-    }
-
-    /// <summary>Returns true when the droid actually moved this frame (drives the walk animation).</summary>
-    bool Think(float dt)
-    {
-        if (backoffTimer > 0f) backoffTimer -= dt;
-        Transform player = gm.Player;
-
-        if (mode == Mode.Chase) UpdateChaseGoal(player);
-
-        if (mode == Mode.Chase && player != null)
-        {
-            // 1) clear shot and the player stands still: stop and fire. The droid only walks again when the player moves.
-            if (clearShot && !gm.PlayerMoving) return Idle(dt);
-
-            Vector3 toPlayer = player.position - transform.position;
-
-            // 2) 1 m from the player: stop and keep facing him
-            if (Vector3.ProjectOnPlane(toPlayer, transform.up).magnitude <= CloseDistance)
-            {
-                FaceDirection(toPlayer, dt);
-                return false;
-            }
-
-            // 3) at the closest point of the waypoint track to the player: stop and keep facing him
-            if (hasStopPoint && Vector3.Distance(transform.position, stopPoint) <= ArriveEps) return Idle(dt);
-        }
-
-        // standing on a node -> decide where to go
-        if (toNode < 0)
-        {
-            if (backoffTimer > 0f) return Idle(dt);
-            if (returning && fromNode == goalNode) returning = false;
-            toNode = ChooseNext();
-            if (toNode < 0) return Idle(dt);
-        }
-
-        Vector3 pos = transform.position;
-
-        // chase, on the connection that holds the stop point: walk straight to the stop point, in whichever direction it lies
-        bool onStopEdge = IsOnStopEdge();
-        if (onStopEdge)
-        {
-            Vector3 ed = gm.NodePos(toNode) - gm.NodePos(fromNode);
-            if (ed.sqrMagnitude > 1e-8f && Vector3.Dot(stopPoint - pos, ed) < 0f)
-            {
-                int sw = fromNode; fromNode = toNode; toNode = sw;   // the stop point is behind me: turn around (no back-off pause)
-            }
-        }
-        else if ((mode == Mode.Chase || returning) && goalNode >= 0 && backoffTimer <= 0f)
-        {
-            // chase / returning: if the goal is now behind us, turn around in the middle of the connection
-            float fwd = Vector3.Distance(pos, gm.NodePos(toNode)) + gm.PathDist(toNode, goalNode);
-            float back = Vector3.Distance(pos, gm.NodePos(fromNode)) + gm.PathDist(fromNode, goalNode);
-            if (back + ReverseMargin < fwd) Reverse();
-        }
-
-        Vector3 tp = onStopEdge ? stopPoint : gm.NodePos(toNode);
-        Vector3 dir = tp - pos;
-        float dist = dir.magnitude;
-
-        // robotic: first turn on the spot, then walk in a straight line
-        if (dist > 0.0001f && !FaceDirection(dir / dist, dt)) return false;
-
-        float step = gm.WalkSpeed * dt;   // same walk speed for patrol and chase
-        bool arrives = dist <= step;
-        Vector3 newPos = arrives ? tp : pos + dir / dist * step;
-
-        // never touch another droid: wait until it moves away
-        if (gm.WouldCollide(this, newPos))
-        {
-            blockedTime += dt;
-            if (blockedTime >= blockLimit)
-            {
-                // head-on / circular deadlock: back off (not while walking to the stop point: it just waits there)
-                blockedTime = 0f;
-                blockLimit = Random.Range(2f, 4f);
-                if (!onStopEdge) Reverse();
-            }
-            return Idle(dt);
-        }
-        blockedTime = 0f;
-
-        transform.position = newPos;
-        if (arrives && !onStopEdge)
-        {
-            prevNode = fromNode;
-            fromNode = toNode;
-            toNode = -1;
-        }
-        // arrived on the stop point in the middle of its connection: stay there (the stop check at the top keeps the droid standing)
-        return true;
     }
 
     // ------------------------------------------------------------------ shooting (same idea as the player's blaster, red)
 
     void UpdateFiring()
     {
-        if (mode != Mode.Chase || !gm.PlayerAlive) return;
+        if (move == null || !move.Chasing || !gm.PlayerAlive) return;
         Transform p = gm.Player;
         if (p == null || Time.time < nextFireTime) return;
 
         // SIGHT is the only distance / visibility rule: the droid shoots while it sees the player (within the Sight Range),
         // from the very first frame it detects him. No sight (e.g. it only senses him through a wall) = no shooting.
-        if (!seesPlayer) return;
+        if (!move.SeesPlayer) return;
 
         Vector3 origin = gunTip.t.position;
         Vector3 want = aimPoint - origin;
@@ -789,10 +600,10 @@ public class IG88Controller : MonoBehaviour
         Vector3 gunDir = gun.t.TransformDirection(gunFwdLocal);
         if (Vector3.Angle(gunDir, want) > maxFireAngle) return;
 
-        // and the bolt itself must have a free path: checked from the gun tip (where the bolt starts) to the player (clearShot, worked out
-        // in UpdateMode), so it never shoots into a wall even if the head sees past a corner. Done BEFORE the cooldown is set, so it fires
+        // and the bolt itself must have a free path: checked from the gun tip (where the bolt starts) to the player (ClearShot, worked out
+        // by the EnemyMoveSystem), so it never shoots into a wall even if the head sees past a corner. Done BEFORE the cooldown is set, so it fires
         // the moment the way is free.
-        if (!clearShot) return;
+        if (!move.ClearShot) return;
 
         nextFireTime = Time.time + 1f / Mathf.Max(0.1f, gm.DroidFireRate);
 
@@ -923,13 +734,6 @@ public class IG88Controller : MonoBehaviour
         if (target == null || gunTip == null) return;
         Gizmos.color = aimAtTarget ? Color.red : Color.gray;
         Gizmos.DrawLine(gunTip.t.position, target.position);
-        
-        Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(transform.position, stopDistance);
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, patrolDistance);
-        Gizmos.color = Color.green;
-        Gizmos.DrawWireSphere(transform.position, detectionDistance);
     }
 
     // Handy for your own scripts / UI buttons:
