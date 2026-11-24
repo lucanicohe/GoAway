@@ -25,13 +25,13 @@ public struct FlatheadLink { public int node; public FlatheadEdgeKind kind; }
 ///        the Flatheads for 'Lose Sight Time' seconds. A Flathead that never saw him is alerted too (the alert is shared).
 ///      - ONE AT A TIME: while the alert lasts, the GameManager sends ONE Flathead (the closest that isn't hiding after a scare) after the
 ///        player, whether or not that one has a line of sight. All the others keep lurking until it is their turn.
-///      - STALK: the chosen one creeps along the track (walking and jumping, slowly) toward the closest STANDABLE point of the track
+///      - STALK: the chosen one moves quickly along the track (walking and jumping) toward the closest STANDABLE point of the track
 ///        to the player and keeps following him as he moves.
 ///      - STRIKE: close enough (or as close as the track lets it get) and with a clear shot: it stops, aims and empties an automatic burst.
 ///      - DODGE: a real but brief look makes it move a little way off, then it resumes its chase.
 ///      - STRIKE: a continuous stare or a second look in quick succession makes it attack immediately.
-///      - FLEE: after its burst it scurries away to a far waypoint. It stays away for 'Flathead Retreat Time', and the GameManager
-///        sends the next Flathead to try its luck.
+///      - FLEE: after a finite burst or when the player spots it during a strike, it runs to a far waypoint. It stays away for
+///        'Flathead Retreat Time', and the GameManager sends the next Flathead to try its luck.
 ///      - Never touches another Flathead: it waits until the other one moves away.
 /// </summary>
 internal sealed class FlatheadMoveSystem
@@ -370,6 +370,7 @@ internal sealed class FlatheadMoveSystem
     const float DoubleLookWindow = 3f;     // a second real look this soon makes it attack
     const float DodgeMaxPath = 3.5f;       // brief evasions only pick a nearby waypoint
     const float DodgeTimeout = 1.5f;       // return to the chase quickly if the nearby waypoint takes too long
+    const int UnlimitedShotsSentinel = 99; // the inspector's 99 setting means no burst limit
 
     /// <summary>True while not just lurking (stalking, dodging, striking or fleeing): such a robot is updated every frame.</summary>
     public bool Hunting { get { return mode != Mode.Patrol; } }
@@ -377,8 +378,15 @@ internal sealed class FlatheadMoveSystem
     public bool Aiming { get { return mode == Mode.Stalk || mode == Mode.Strike || mode == Mode.Dodge; } }
     /// <summary>True while it stands still and is allowed to shoot.</summary>
     public bool Striking { get { return mode == Mode.Strike; } }
-    /// <summary>True once it has fired all the bolts of its burst ('Flathead Shots Per Strike'): it fires no more and only waits to run.</summary>
-    public bool BurstDone { get { int max = gm.FlatheadShotsPerStrike; return max > 0 && shotsFired >= max; } }
+    /// <summary>True once it has fired a configured finite burst. 0 or 99+ shots means unlimited.</summary>
+    public bool BurstDone
+    {
+        get
+        {
+            int max = gm.FlatheadShotsPerStrike;
+            return max > 0 && max < UnlimitedShotsSentinel && shotsFired >= max;
+        }
+    }
     /// <summary>True while it is the one Flathead going after the player (stalking, dodging or striking).</summary>
     public bool OnTheHunt { get { return mode == Mode.Stalk || mode == Mode.Strike || mode == Mode.Dodge; } }
     /// <summary>Lurking and not hiding from the player after a scare or a failed stalk: the GameManager may send this one while the Flatheads are alerted
@@ -477,7 +485,7 @@ internal sealed class FlatheadMoveSystem
         strikeStartDist = p != null ? Vector3.Distance(owner.position, p.position) : 0f;
     }
 
-    // After it finishes its burst, it runs to a far waypoint and keeps away for 'Flathead Retreat Time'.
+    // After it finishes a finite burst or the player catches it during a strike, it runs to a far waypoint and stays away for 'Flathead Retreat Time'.
     void BeginFlee()
     {
         mode = Mode.Flee;
@@ -519,6 +527,15 @@ internal sealed class FlatheadMoveSystem
         {
             if (!wasLooking) currentLookStartTime = Time.time;
             gazeTimer += dt;
+
+            // Once it is attacking, a fresh look of at least half a second makes it flee. The look that caused
+            // a long-stare / double-look attack is allowed to finish its attack first.
+            if (mode == Mode.Strike && !currentLookTriggeredAttack && gazeTimer >= GlanceIgnoreTime)
+            {
+                BeginFlee();
+                return;
+            }
+
             if (gazeTimer >= attackLookTime)
             {
                 hasQualifiedLook = false;
@@ -644,6 +661,8 @@ internal sealed class FlatheadMoveSystem
         if (p == null) return;
 
         UpdateGaze(dt);
+
+        if (mode == Mode.Flee) return;
 
         if (mode == Mode.Dodge)
         {

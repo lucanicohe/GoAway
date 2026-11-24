@@ -40830,7 +40830,7 @@ MonoBehaviour:
   r5: {fileID: 68513790}
   drawWaypointGizmos: 1
   flatheadPrefab: {fileID: 1381394780585354254, guid: 9b4241df7d31441d58c710e63f777346, type: 3}
-  flatheadCount: 6
+  flatheadCount: 9
   flatheadHealth: 1
   flatheadTurretHitRadius: 0.25
   flatheadDamage: 1
@@ -40840,19 +40840,19 @@ MonoBehaviour:
   flatheadBoltLightRange: 3
   flatheadStepsPerSecond: 1.4
   flatheadStrideLength: 0.3
-  flatheadJumpSpeed: 0.5
-  flatheadJumpArc: 0.5
+  flatheadJumpSpeed: 6
+  flatheadJumpArc: 0.62
   flatheadPatrolZoneSize: 4
   minFlatheadDistance: 3
-  flatheadSenseRadius: 15
-  flatheadSneakSpeed: 0.7
-  flatheadFleeSpeed: 2.5
-  flatheadStrikeDistance: 6
-  flatheadShotsPerStrike: 99
+  flatheadSenseRadius: 20
+  flatheadSneakSpeed: 3
+  flatheadFleeSpeed: 5
+  flatheadStrikeDistance: 9
+  flatheadShotsPerStrike: 12
   flatheadGazeAngle: 15
   flatheadGazeTime: 0.3
-  flatheadRetreatTime: 12
-  flatheadReplaceDelay: 2
+  flatheadRetreatTime: 6
+  flatheadReplaceDelay: 1
   flatheadPictureUp: {x: 0, y: 0, z: 1}
   flatheadSurfaceOffset: 0
   w1: {fileID: 2052142267}

@@ -180,8 +180,8 @@ public class GameManager : MonoBehaviour
     //  FLATHEAD ROBOTS (four-legged turrets on the walls and the ceiling)
     //  They use the same detection / aim settings as the droids above (Sight Range, Detection Radius, Lose Sight Time,
     //  Droid Accuracy, Droid Bolt Speed, Droid Off, Droid Patrol Off). Their damage and fire rate are their own (Flathead Weapon).
-    //  They are SNEAKY (see 'Flathead Stealth'): hidden by their own stealth material, one at a time creeps up on the player, dodges one look but
-    //  keeps chasing, then strikes immediately after a long stare or a second quick look.
+    //  They are SNEAKY (see 'Flathead Stealth'): hidden by their own stealth material, one at a time closes quickly, dodges one look but keeps
+    //  chasing, strikes after a long/repeated look, and flees if newly spotted during an active strike.
     // =====================================================================
 
     [Header("Flathead Spawning")]
@@ -203,7 +203,7 @@ public class GameManager : MonoBehaviour
     [Tooltip("Health the player loses per Flathead bolt that hits him. (The IG-88 droids have their own 'Droid Damage'.)")]
     [Min(0f)]
     [SerializeField] private float flatheadDamage = 6f;
-    [Tooltip("AUTOMATIC FIRE: bolts per second while a Flathead strikes. A strike fires 'Flathead Shots Per Strike' bolts at this rate, so 9 shots at 25 per second is a burst of about 0.4 seconds. " +
+    [Tooltip("AUTOMATIC FIRE: bolts per second while a Flathead strikes. It keeps firing at this rate until its finite shot limit is reached. " +
              "(The IG-88 droids use 'Droid Fire Rate'.) Works at any frame rate.")]
     [Range(1f, 60f)]
     [SerializeField] private float flatheadFireRate = 25f;
@@ -219,7 +219,7 @@ public class GameManager : MonoBehaviour
     [Header("Flathead Movement")]
     [Tooltip("Walk animation speed (full step cycles per second). The walking speed in m/s is Stride Length x Steps Per Second / 0.55, so the feet never slide.")]
     [Range(0.3f, 4f)]
-    [SerializeField] private float flatheadStepsPerSecond = 1.4f;
+    [SerializeField] private float flatheadStepsPerSecond = 1.8f;
     [Tooltip("Length of one step in metres.")]
     [Range(0.05f, 0.5f)]
     [SerializeField] private float flatheadStrideLength = 0.30f;
@@ -235,28 +235,28 @@ public class GameManager : MonoBehaviour
     [Tooltip("Flatheads never get closer than this to each other. One that would break this waits until the other one moves.")]
     [SerializeField] private float minFlatheadDistance = 0.5f;
 
-    [Header("Flathead Stealth (sneaky droid: hides, creeps up one at a time, briefly dodges a look, attacks after repeated or long looks)")]
+    [Header("Flathead Stealth (sneaky droid: hides, closes quickly one at a time, dodges a look, attacks after repeated/long looks)")]
     [Tooltip("A Flathead closer than this to the player (metres) senses him even WITHOUT a line of sight, through walls, like a mosquito smelling you. " +
              "Whenever ONE Flathead sees or senses the player, ALL Flatheads are alerted for 'Lose Sight Time' seconds and the next one comes, " +
              "even one that never saw him. 0 = sight only.")]
     [Min(0f)]
     [SerializeField] private float flatheadSenseRadius = 15f;
-    [Tooltip("Walking speed while it creeps up on the player, as a multiple of the normal walking speed. 1 = normal, 0.5 = half as fast.")]
-    [Range(0.2f, 1.5f)]
-    [SerializeField] private float flatheadSneakSpeed = 0.7f;
-    [Tooltip("Walking speed (and jump speed) while it briefly dodges a look or runs after its burst, as a multiple of normal speed.")]
+    [Tooltip("Walking and jump speed while it closes in on the player, as a multiple of normal speed. 2 = twice as fast.")]
+    [Range(2f, 3f)]
+    [SerializeField] private float flatheadSneakSpeed = 2f;
+    [Tooltip("Walking speed (and jump speed) while it briefly dodges, flees during an attack, or runs after its burst.")]
     [Range(1f, 5f)]
     [SerializeField] private float flatheadFleeSpeed = 2.5f;
     [Tooltip("It stops and strikes when it is this close to the player (metres) and has a clear shot. If the track doesn't let it get that close, it strikes from the closest point it can reach.")]
     [Min(0.5f)]
     [SerializeField] private float flatheadStrikeDistance = 6f;
-    [Tooltip("Bolts in one automatic burst (fired at 'Flathead Fire Rate'), then it runs away (hit and run) and the next Flathead comes. 0 = no automatic run after a finite burst.")]
+    [Tooltip("Bolts in one attack before it runs away. Set to 0 or 99+ for unlimited shots. With a finite limit, it runs after its burst and the next Flathead comes.")]
     [Min(0)]
-    [SerializeField] private int flatheadShotsPerStrike = 9;
+    [SerializeField] private int flatheadShotsPerStrike = 99;
     [Tooltip("The player 'looks at' a Flathead when it is within this many degrees of the centre of the screen (and nothing solid is in between). Works however well its stealth material hides it. 0 = gaze reactions off.")]
     [Range(0f, 45f)]
     [SerializeField] private float flatheadGazeAngle = 15f;
-    [Tooltip("Seconds the player must keep looking at a Flathead before it attacks immediately. Looks under 0.5 seconds are ignored; a second look within 3 seconds also makes it attack. Minimum is 2 seconds.")]
+    [Tooltip("Seconds the player must keep looking before it attacks immediately. Looks under 0.5 seconds are ignored; a second look within 3 seconds also triggers an attack. During an attack, a fresh 0.5 second look makes it flee.")]
     [Range(2f, 5f)]
     [SerializeField] private float flatheadGazeTime = 2f;
     [Tooltip("Seconds a Flathead stays away after it finishes its burst and runs. A brief reaction to being seen keeps the current Flathead chasing.")]
@@ -387,7 +387,7 @@ public class GameManager : MonoBehaviour
     public float FlatheadJumpArc => flatheadJumpArc;
     public int FlatheadPatrolZone => flatheadPatrolZoneSize;
     public Transform FlatheadAimTarget => flatheadAimTarget;
-    public float FlatheadSneakSpeed => flatheadSneakSpeed;
+    public float FlatheadSneakSpeed => Mathf.Max(2f, flatheadSneakSpeed);
     public float FlatheadFleeSpeed => flatheadFleeSpeed;
     public float FlatheadStrikeDistance => flatheadStrikeDistance;
     public int FlatheadShotsPerStrike => flatheadShotsPerStrike;
@@ -439,6 +439,7 @@ public class GameManager : MonoBehaviour
     {
         droidCount = Mathf.Clamp(droidCount, 0, MaxDroids);
         flatheadCount = Mathf.Clamp(flatheadCount, 0, MaxFlatheads);
+        flatheadSneakSpeed = Mathf.Clamp(flatheadSneakSpeed, 2f, 3f);
     }
 
     private void Awake()
@@ -1330,7 +1331,7 @@ public class GameManager : MonoBehaviour
     /// <summary>
     /// Only ONE Flathead goes after the player at a time. While it is stalking, dodging or striking, all the others just lurk.
     /// As soon as one Flathead has seen or sensed the player, ALL of them are alerted (see FlatheadAlert), so a Flathead that never saw him
-    /// still comes. When the hunter finishes its burst and runs away, gives up or dies, the next one is sent
+    /// still comes. When the hunter flees after a finite burst or being seen during its strike, gives up or dies, the next one is sent
     /// after 'Flathead Replace Delay': the closest Flathead that isn't hiding from an earlier scare. Needs no sight of the player.
     /// </summary>
     private void UpdateFlatheadHunter()

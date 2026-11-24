@@ -8,9 +8,9 @@ using FlatheadRobotKit;
 ///  - It drives the FlatheadController (walking, walk direction, jump, turret aim). The animation itself stays in the FlatheadController.
 ///  - SNEAKY: the hiding is done by YOUR stealth material on the prefab. This script never touches materials or renderers.
 ///    It never fires just because it sees the player: the GameManager sends ONE Flathead at a time (all Flatheads are alerted as soon as
-///    one sees or senses the player), it stalks the player, briefly dodges a real look while keeping the chase, and strikes with an automatic
-///    burst when close enough. A stare over two seconds or a second look within a short window triggers an immediate strike.
-///  - SHOOTING: red bolts from the gun muzzle in AUTOMATIC bursts (Flathead Fire Rate, Flathead Shots Per Strike), ONLY while it is striking,
+///    one sees or senses the player), it stalks the player, briefly dodges one real look while keeping the chase, and strikes after a long or
+///    repeated look. It flees if the player starts looking at it during an active strike.
+///  - SHOOTING: red bolts from the gun muzzle at Flathead Fire Rate while striking. Flathead Shots Per Strike can cap the burst or be unlimited,
 ///    the gun points at the player and the bolt has a free path.
 ///  - HEALTH + DEATH: a hit on the turret does 'headshot' damage, a hit anywhere else body damage (see the GameManager). At 0 every part
 ///    breaks loose and falls (from the ceiling too).
