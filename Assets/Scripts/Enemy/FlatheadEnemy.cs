@@ -6,21 +6,46 @@ using FlatheadRobotKit;
 /// Flathead ENEMY brain, the counterpart of the IG88Controller. The GameManager adds it to the Flathead prefab by itself when it spawns
 /// (the prefab only needs the FlatheadController, you don't have to add this script).
 ///  - It drives the FlatheadController (walking, walk direction, jump, turret aim). The animation itself stays in the FlatheadController.
-///  - SHOOTING: red bolts from the gun muzzle, only while the robot sees the player, the gun points at him and the bolt has a free path.
+///  - SNEAKY: the hiding is done by YOUR stealth material on the prefab. This script never touches materials or renderers.
+///    It never fires just because it sees the player: the GameManager sends ONE Flathead at a time (all Flatheads are alerted as soon as
+///    one sees or senses the player), it stalks the player, briefly dodges a real look while keeping the chase, and strikes with an automatic
+///    burst when close enough. A stare over two seconds or a second look within a short window triggers an immediate strike.
+///  - SHOOTING: red bolts from the gun muzzle in AUTOMATIC bursts (Flathead Fire Rate, Flathead Shots Per Strike), ONLY while it is striking,
+///    the gun points at the player and the bolt has a free path.
 ///  - HEALTH + DEATH: a hit on the turret does 'headshot' damage, a hit anywhere else body damage (see the GameManager). At 0 every part
 ///    breaks loose and falls (from the ceiling too).
 /// WHERE the robot goes and WHEN it detects / chases the player is decided by the FlatheadMoveSystem (waypoints only, no NavMesh).
 /// </summary>
 [DisallowMultipleComponent]
 [AddComponentMenu("Flathead Robot/Flathead Enemy")]
-public class FlatheadEnemy : MonoBehaviour
+public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
 {
+    // CullingGroup LOD & Frustum Culling state
+    Transform EnemyCullingManager.ICullableTarget.Transform => transform;
+    private bool isVisibleToCamera = true;
+    private int distanceBand = 0; // 0 = 0-20m, 1 = 20-50m, 2 = 50-100m, 3 = 100m+
+    private float aiAccumulatedDt = 0f;
+
+    /// <summary>Invoked by EnemyCullingManager when camera visibility or distance band changes.</summary>
+    public void OnCullingStateChanged(bool visible, int band)
+    {
+        isVisibleToCamera = visible;
+        distanceBand = Mathf.Clamp(band, 0, 3);
+        if (ctrl != null)
+        {
+            // Skip procedural leg IK when offscreen and not right next to the player (never while hunting: the turret has to keep aiming)
+            ctrl.cullVisuals = !isVisibleToCamera && distanceBand > 0 && !(move != null && move.Hunting);
+        }
+    }
+
     [Header("Health (set by GameManager when the robot spawns)")]
     public float health = 3f;
 
     [Header("Shooting")]
     [Tooltip("The robot only fires when its gun points at the player within this many degrees.")]
     [Range(2f, 45f)] public float maxFireAngle = 12f;
+    [Tooltip("Sneak attack: seconds between the robot stopping to strike and its first bolt (it uses them to aim). Gives the player a moment to notice it.")]
+    [Range(0f, 2f)] public float strikeWindup = 0.4f;
 
     [Header("Death: break apart")]
     [Tooltip("How hard the pieces are thrown away when the robot dies.")]
@@ -36,13 +61,25 @@ public class FlatheadEnemy : MonoBehaviour
     GameManager gm;
     FlatheadMoveSystem move;
     bool ready;
-    bool wasChasing;
+    bool wasAiming;
+    bool wasStriking;
     float nextFireTime;
+    bool wallBlocked;                             // a wall is between the robot and the player: its sounds are muffled
+    float wallCheckTimer;
+    static readonly RaycastHit[] wallHits = new RaycastHit[16];
     Vector3 aimPoint;
     Vector3 restForwardLocal = Vector3.forward;   // robot forward in root-local space (never changes)
 
     public FlatheadController Ctrl { get { return ctrl; } }
     public bool IsDead { get; private set; }
+
+    // ---- one hunter at a time: the GameManager asks these and sends the closest Flathead that CanHunt
+    /// <summary>Lurking and not hiding after a scare: may be sent after the player while the Flatheads are alerted (it needn't see him itself).</summary>
+    public bool CanHunt { get { return ready && !IsDead && move != null && move.CanHunt; } }
+    /// <summary>The one Flathead that is stalking, briefly dodging or striking right now.</summary>
+    public bool IsHunting { get { return ready && !IsDead && move != null && move.OnTheHunt; } }
+    /// <summary>Called by the GameManager: this Flathead goes after the player, dodging briefly on a single look and striking on repeated or long looks.</summary>
+    public void StartHunting() { if (ready && !IsDead && move != null) move.BeginStalk(); }
 
     /// <summary>While the robot is jumping, the spot it will land on is reserved: other Flatheads keep their distance from it too.</summary>
     public bool HasLanding { get; private set; }
@@ -98,7 +135,8 @@ public class FlatheadEnemy : MonoBehaviour
 
         IsDead = false;
         health = gm.FlatheadHealth;
-        wasChasing = false;
+        wasAiming = false;
+        wasStriking = false;
         move = new FlatheadMoveSystem(this, gm, startNode);   // puts the robot on its start waypoint
         ready = true;
     }
@@ -131,30 +169,61 @@ public class FlatheadEnemy : MonoBehaviour
         if (!ready || gm == null || move == null || IsDead) return;
         float dt = Time.deltaTime;
 
-        // detection + waypoint movement (walking / jumping flags of the FlatheadController are set in here)
-        move.Tick(dt);
+        // CullingGroup Distance LOD:
+        // Band 0 (0-20m):   full frame rate
+        // Band 1 (20-50m):  ~10 Hz (interval 0.1s)
+        // Band 2 (50-100m): ~2 Hz (interval 0.5s)
+        // Band 3 (100m+):   ~1 Hz (interval 1.0s)
+        float interval = distanceBand == 0 ? 0f : (distanceBand == 1 ? 0.1f : (distanceBand == 2 ? 0.5f : 1.0f));
+        aiAccumulatedDt += dt;
+        // a hunting robot (stalking, striking, fleeing) is never slowed down by distance: sight, gaze, aiming and shooting need every frame
+        bool shouldTickAI = interval <= 0f || aiAccumulatedDt >= interval || move.Hunting;
 
-        // a chase starts / ends: the turret aims at the player (or goes back to rest), and the first shot is allowed right away
-        bool chasing = move.Chasing;
-        if (chasing != wasChasing)
+        if (shouldTickAI)
         {
-            wasChasing = chasing;
-            ctrl.aimAtTarget = chasing;
-            if (chasing) nextFireTime = Time.time;
+            // Detection + waypoint movement using accumulated dt so speed and distance are exact
+            move.Tick(aiAccumulatedDt);
+            aiAccumulatedDt = 0f;
         }
+
+        // the turret follows the player while the robot stalks / strikes (and goes back to rest while it lurks or runs away)
+        bool hunting = move.Hunting;
+        bool aiming = move.Aiming;
+        if (aiming != wasAiming)
+        {
+            wasAiming = aiming;
+            ctrl.aimAtTarget = aiming;
+        }
+
+        // a strike begins: the first bolt waits a moment (it stops and aims), so the player gets a chance to notice it
+        bool striking = move.Striking;
+        if (striking != wasStriking)
+        {
+            wasStriking = striking;
+            if (striking) nextFireTime = Time.time + strikeWindup;
+        }
+
         ctrl.target = gm.FlatheadAimTarget;   // an object that sits on the centre of the player (kept up to date by the GameManager)
+        ctrl.cullVisuals = !isVisibleToCamera && distanceBand > 0 && !hunting;   // a hunting turret always keeps aiming
 
         if (gm.Player != null) aimPoint = gm.PlayerAimPoint;
 
+        // Shooting does NOT depend on the CullingGroup (UpdateFiring only does something while the robot is striking)
         if (!gm.DroidPatrolOff) UpdateFiring();
+
+        // Nonessential audio muffle raycasts suspended when far away (>50m), same as the IG-88
+        if (hunting || distanceBand < 2) UpdateSoundMuffle(dt);
     }
 
-    // ------------------------------------------------------------------ shooting (same rules as the IG-88)
+    // ------------------------------------------------------------------ shooting (a short burst while striking)
 
     void UpdateFiring()
     {
-        if (!move.Chasing || !gm.PlayerAlive) return;
+        if (!move.Striking || !gm.PlayerAlive) return;
         if (gm.Player == null || Time.time < nextFireTime) return;
+
+        // the burst is used up: no more bolts while it waits to run (at automatic rates a few more would slip out otherwise)
+        if (move.BurstDone) return;
 
         // sight is the only distance / visibility rule: it shoots while it sees the player
         if (!move.SeesPlayer) return;
@@ -169,9 +238,20 @@ public class FlatheadEnemy : MonoBehaviour
         // and the bolt must have a free path from the muzzle (never into a wall)
         if (!move.ClearShot) return;
 
-        nextFireTime = Time.time + 1f / Mathf.Max(0.1f, gm.DroidFireRate);
+        // AUTOMATIC FIRE: 'Flathead Fire Rate' bolts per second. At a high rate more than one bolt can be due within one frame,
+        // so every bolt that is due is fired (a few per frame at most), and the rate doesn't depend on the frame rate.
+        float interval = 1f / Mathf.Max(0.1f, gm.FlatheadFireRate);
+        if (Time.time - nextFireTime > interval) nextFireTime = Time.time;   // it had to wait for its aim: no big catch-up volley
+        for (int guard = 0; guard < 4 && Time.time >= nextFireTime && !move.BurstDone; guard++)
+        {
+            FireBolt(origin, want);
+            nextFireTime += interval;
+        }
+    }
 
-        // aim at the player, then add the random spread (Droid Accuracy in the GameManager)
+    // one bolt: aimed at the player, plus the random spread (Droid Accuracy in the GameManager, new spread for every bolt)
+    void FireBolt(Vector3 origin, Vector3 want)
+    {
         Vector3 dir = want.normalized;
         float spread = gm.DroidSpreadDegrees;
         if (spread > 0f)
@@ -179,7 +259,50 @@ public class FlatheadEnemy : MonoBehaviour
             Vector2 s = Random.insideUnitCircle * spread;
             dir = Quaternion.LookRotation(dir) * Quaternion.Euler(-s.y, s.x, 0f) * Vector3.forward;
         }
-        gm.FireDroidBolt(origin, dir);
+        gm.FireFlatheadBolt(origin, dir);
+        ctrl.PlayFireSound();
+        move.NoteShot();   // counts toward the burst: when it is used up the robot runs
+    }
+
+    // ------------------------------------------------------------------ sounds through walls (same rules as the IG-88)
+
+    // wall between robot and player = quieter + muffled. The FlatheadController owns the Audio Sources and does the fading.
+    void UpdateSoundMuffle(float dt, bool snap = false)
+    {
+        wallCheckTimer -= dt;
+        if (snap || wallCheckTimer <= 0f)
+        {
+            wallCheckTimer = 0.1f;                                   // 10 checks per second is plenty
+            wallBlocked = ctrl.muffleThroughWalls && IsSoundBlocked();
+        }
+        ctrl.SetSoundsBlocked(wallBlocked, dt, snap);
+    }
+
+    // line from the turret to the player's ears (the main camera). Anything solid in between that is not this robot, the player
+    // or another droid counts as a wall.
+    bool IsSoundBlocked()
+    {
+        UnityEngine.Camera cam = UnityEngine.Camera.main;   // full name on purpose: a script called "Camera" in the project would hide Unity's Camera
+        Transform player = gm != null ? gm.Player : null;
+        Transform ear = cam != null ? cam.transform : player;
+        if (ear == null) return false;
+
+        Vector3 from = EyePosition;
+        Vector3 d = ear.position - from;
+        float dist = d.magnitude;
+        if (dist < 0.1f) return false;
+
+        int n = Physics.RaycastNonAlloc(from, d / dist, wallHits, dist, ctrl.wallMask, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < n; i++)
+        {
+            Transform h = wallHits[i].collider.transform;
+            if (h.IsChildOf(transform)) continue;                               // this robot
+            if (player != null && h.IsChildOf(player)) continue;                // the player
+            if (h.GetComponentInParent<FlatheadEnemy>() != null) continue;      // other Flatheads
+            if (h.GetComponentInParent<IG88Controller>() != null) continue;     // IG-88 droids
+            return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ health / death
@@ -209,6 +332,8 @@ public class FlatheadEnemy : MonoBehaviour
         ctrl.walking = false;
         ctrl.jump = false;
         ctrl.aimAtTarget = false;
+        UpdateSoundMuffle(0f, true);                   // wall between the robot and the player right now? the destruction sound follows it
+        ctrl.PlayDeathSounds();
         if (gm != null) gm.UnregisterFlathead(this);   // a dead robot no longer blocks the living ones
         BreakApart(hitPoint, hitDirection);
         ctrl.enabled = false;                          // otherwise its pose reset would snap the bones back

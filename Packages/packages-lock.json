@@ -41,6 +41,13 @@
       "dependencies": {},
       "hash": "4a2d9c8e6a4f0fa50ecb24ec2d14ae588b1951da"
     },
+    "com.neuecc.unirx": {
+      "version": "https://github.com/neuecc/UniRx.git?path=Assets/Plugins/UniRx/Scripts",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {},
+      "hash": "6baeccf6c544c155497164327cca72f28163a578"
+    },
     "com.unity.ai.navigation": {
       "version": "2.0.16",
       "depth": 0,

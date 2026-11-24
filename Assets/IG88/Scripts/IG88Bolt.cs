@@ -1,13 +1,13 @@
 using UnityEngine;
 
 /// <summary>
-/// Red droid blaster bolt. Built and pooled by the GameManager (nothing to set up by hand).
+/// Red droid blaster bolt. Built and pooled by the GameManager (UnityEngine.Pool.ObjectPool, nothing to set up by hand).
 /// Flies at the speed set in the GameManager, sphere-casts along its path like the player's bolt,
-/// ignores droid bodies (no friendly fire) and reports the first hit back to the GameManager.
+/// ignores droid / Flathead bodies (no friendly fire) and reports the first hit back to the GameManager.
+/// When it has hit something or flown out of range it goes back into the pool (ReleaseDroidBolt).
 ///
-/// OPTIMIZATION: droid-body exclusion uses CompareTag("Droid") as a fast O(1) path before
-/// falling back to GetComponentInParent, eliminating the expensive component walk for every
-/// non-droid collider (walls, player, props) on every frame.
+/// OPTIMIZATION: the "is this a droid collider?" answer comes from GameManager.IsEnemyCollider, which remembers it
+/// per collider (tag walk / component walk happens once per collider, never every frame).
 /// </summary>
 public class IG88Bolt : MonoBehaviour
 {
@@ -15,21 +15,24 @@ public class IG88Bolt : MonoBehaviour
     float castRadius = 0.03f;
     float speed, range, travelled, damage;
     Vector3 dir = Vector3.forward;
+    bool inFlight;
     readonly RaycastHit[] hits = new RaycastHit[16];
     Light[] lights;
 
-    // Tag that the IG-88 prefab's root (and/or its collider objects) must carry so the bolt can
-    // skip the expensive GetComponentInParent walk for the common "hit a wall" case.
-    // If you have not set up a "Droid" tag yet, the fallback GetComponentInParent is still used.
-    const string DroidTag = "Droid";
+    public bool InFlight { get { return inFlight; } }
 
-    public void Setup(GameManager manager, float radius)
+    /// <summary>True for a Flathead bolt (it goes back into the Flathead pool).</summary>
+    public bool IsFlathead { get; private set; }
+
+    public void Setup(GameManager manager, float radius, bool flathead = false)
     {
         gm = manager;
         castRadius = radius;
+        IsFlathead = flathead;
     }
 
-    public void Launch(Vector3 origin, Vector3 direction, float boltSpeed, float maxRange, float boltDamage)
+    public void Launch(Vector3 origin, Vector3 direction, float boltSpeed, float maxRange, float boltDamage,
+                       float lightIntensity, float lightRange, Color lightColor)
     {
         dir = direction.normalized;
         speed = boltSpeed;
@@ -37,36 +40,42 @@ public class IG88Bolt : MonoBehaviour
         damage = boltDamage;
         travelled = 0f;
         transform.SetPositionAndRotation(origin, Quaternion.LookRotation(dir));
-        NoShadows();
+        ApplyLights(lightIntensity, lightRange, lightColor);
+        inFlight = true;
         gameObject.SetActive(true);
     }
 
-    // Every light on the bolt gets shadows off (done once, on the first launch).
-    void NoShadows()
+    // Every light on the bolt: shadows always off, intensity / range / colour from the GameManager (so the Inspector values work live).
+    // The lights are looked up on the first launch (the GameManager adds the light after Setup).
+    void ApplyLights(float intensity, float lightRange, Color lightColor)
     {
-        if (lights != null) return;
-        lights = GetComponentsInChildren<Light>(true);
+        if (lights == null)
+        {
+            lights = GetComponentsInChildren<Light>(true);
+            for (int i = 0; i < lights.Length; i++)
+                lights[i].shadows = LightShadows.None;
+        }
         for (int i = 0; i < lights.Length; i++)
-            lights[i].shadows = LightShadows.None;
+        {
+            lights[i].intensity = intensity;
+            lights[i].range = lightRange;
+            lights[i].color = lightColor;
+        }
     }
 
-    static bool IsDroidCollider(Collider c)
+    // Back into the pool (only once per flight).
+    void Finish()
     {
-        // Fast path: tag check is O(1) and allocates nothing.
-        // Requires the IG-88 prefab root (or its collider child) to have the "Droid" tag.
-        // Falls back to the component walk so existing scenes without the tag still work.
-        Transform t = c.transform;
-        while (t != null)
-        {
-            if (t.CompareTag(DroidTag)) return true;
-            t = t.parent;
-        }
-        // Final fallback for scenes that have not set up the tag yet.
-        return c.GetComponentInParent<IG88Controller>() != null;
+        if (!inFlight) return;
+        inFlight = false;
+        if (gm != null) gm.ReleaseDroidBolt(this);
+        else gameObject.SetActive(false);
     }
 
     void Update()
     {
+        if (!inFlight) return;
+
         float step = speed * Time.deltaTime;
         Vector3 pos = transform.position;
 
@@ -77,19 +86,19 @@ public class IG88Bolt : MonoBehaviour
         {
             Collider c = hits[i].collider;
             if (c == null) continue;
-            if (IsDroidCollider(c)) continue;   // droids never shoot each other
+            if (GameManager.IsEnemyCollider(c)) continue;   // droids never shoot each other
             if (hits[i].distance < bestDist) { bestDist = hits[i].distance; best = i; }
         }
 
         if (best >= 0)
         {
             if (gm != null) gm.DroidBoltHit(hits[best], dir, damage);
-            gameObject.SetActive(false);
+            Finish();
             return;
         }
 
         transform.position = pos + dir * step;
         travelled += step;
-        if (travelled >= range) gameObject.SetActive(false);
+        if (travelled >= range) Finish();
     }
 }

@@ -126,12 +126,18 @@ public class VisorHud : MonoBehaviour
     [UnityEngine.HideInInspector] public Text[] compassTexts;
 
     float shownHealth = 1f, shownAmmo = 1f;
+    float prevShownHealth = -1f, prevShownAmmo = -1f;
+    int lastHealthNumber = -9999, lastAmmoNumber = -9999;
+    bool staticVisualsDirty = true;
     float lastYaw;
 
     public float Health { get { return health; } set { health = Mathf.Clamp01(value); } }
     public float Ammo { get { return ammo; } set { ammo = Mathf.Clamp01(value); } }
     public void SetHealth(float value01) { health = Mathf.Clamp01(value01); }
     public void SetAmmo(float value01) { ammo = Mathf.Clamp01(value01); }
+
+    /// <summary>Marks static HUD visuals dirty so they get refreshed on the next frame.</summary>
+    public void MarkVisualsDirty() { staticVisualsDirty = true; }
 
     /// <summary>Compass bearing in degrees (0 = North, 90 = East, 180 = South, 270 = West).</summary>
     public float Heading { get { return Mathf.Repeat(ReadYaw() - northOffset, 360f); } }
@@ -141,6 +147,7 @@ public class VisorHud : MonoBehaviour
         AutoWire();
         shownHealth = health;
         shownAmmo = ammo;
+        staticVisualsDirty = true;
         Apply();
     }
 
@@ -154,6 +161,7 @@ public class VisorHud : MonoBehaviour
             AutoWire();
             shownHealth = health;
             shownAmmo = ammo;
+            staticVisualsDirty = true;
             Apply();
         };
 #endif
@@ -161,19 +169,49 @@ public class VisorHud : MonoBehaviour
 
     void Update()
     {
+        // Static visor panels and settings are only repainted when dirty, not every frame!
+        if (staticVisualsDirty || !Application.isPlaying)
+        {
+            ApplyStaticLook();
+            staticVisualsDirty = false;
+        }
+
+        bool barsChanged = false;
         if (Application.isPlaying && smoothTime > 0.0001f)
         {
             // starts moving at full speed right away (no slow ease-in) and is practically there after smoothTime seconds
             float k = 1f - Mathf.Exp(-3f * Time.deltaTime / smoothTime);
-            shownHealth = Mathf.Abs(health - shownHealth) < 0.0005f ? health : Mathf.Lerp(shownHealth, health, k);
-            shownAmmo = Mathf.Abs(ammo - shownAmmo) < 0.0005f ? ammo : Mathf.Lerp(shownAmmo, ammo, k);
+            float nextH = Mathf.Abs(health - shownHealth) < 0.0005f ? health : Mathf.Lerp(shownHealth, health, k);
+            float nextA = Mathf.Abs(ammo - shownAmmo) < 0.0005f ? ammo : Mathf.Lerp(shownAmmo, ammo, k);
+            if (Mathf.Abs(nextH - shownHealth) > 0.0001f || Mathf.Abs(nextA - shownAmmo) > 0.0001f)
+            {
+                shownHealth = nextH;
+                shownAmmo = nextA;
+                barsChanged = true;
+            }
         }
         else
         {
-            shownHealth = health;
-            shownAmmo = ammo;
+            if (shownHealth != health || shownAmmo != ammo)
+            {
+                shownHealth = health;
+                shownAmmo = ammo;
+                barsChanged = true;
+            }
         }
-        Apply();
+
+        // Only redraw the wipes and bar fills when the values are actively animating!
+        if (barsChanged || prevShownHealth != shownHealth || prevShownAmmo != shownAmmo)
+        {
+            prevShownHealth = shownHealth;
+            prevShownAmmo = shownAmmo;
+            ApplyBars();
+        }
+
+        if (showCompass)
+        {
+            UpdateCompass();
+        }
     }
 
     Transform FindDeep(Transform root, string childName)
@@ -357,6 +395,8 @@ public class VisorHud : MonoBehaviour
     /// <summary>Pushes the live health number (e.g. 120 -> 0) onto the number text, or onto the health label if none is assigned.</summary>
     public void SetHealthNumber(int value)
     {
+        if (lastHealthNumber == value) return;
+        lastHealthNumber = value;
         Text t = healthNumberText != null ? healthNumberText : healthLabel;
         if (t != null) t.text = value.ToString();
     }
@@ -364,6 +404,8 @@ public class VisorHud : MonoBehaviour
     /// <summary>Pushes the live ammo number onto the number text, or onto the ammo label if none is assigned.</summary>
     public void SetAmmoNumber(int value)
     {
+        if (lastAmmoNumber == value) return;
+        lastAmmoNumber = value;
         Text t = ammoNumberText != null ? ammoNumberText : ammoLabel;
         if (t != null) t.text = value.ToString();
     }
@@ -411,13 +453,16 @@ public class VisorHud : MonoBehaviour
         }
     }
 
-    void Apply()
+    void ApplyBars()
     {
         ApplyBar(healthFill, healthWipe, shownHealth, healthColor, healthBarOpacity, healthEmptyAngle);
         ApplyBar(ammoFill, ammoWipe, shownAmmo, ammoColor, ammoBarOpacity, ammoEmptyAngle);
         if (healthBack != null) healthBack.color = Dim(healthColor, emptyBarOpacity * healthBarOpacity);
         if (ammoBack != null) ammoBack.color = Dim(ammoColor, emptyBarOpacity * ammoBarOpacity);
+    }
 
+    void ApplyStaticLook()
+    {
         ApplyLabel(healthLabel, healthLabelOpacity);
         ApplyLabel(ammoLabel, ammoLabelOpacity);
         ApplyNumber(healthNumberText, healthNumberOpacity);
@@ -454,7 +499,6 @@ public class VisorHud : MonoBehaviour
         Paint(rightArcImage, rightArcColor);
         Paint(compassLineImage, compassLineColor);
         Paint(compassTicksImage, compassTicksColor);
-        UpdateCompass();
 
         if (group != null) group.alpha = hudOpacity;
         if (crosshairImage != null)
@@ -463,5 +507,12 @@ public class VisorHud : MonoBehaviour
             RectTransform rt = crosshairImage.rectTransform;
             if (Mathf.Abs(rt.sizeDelta.x - crosshairSize) > 0.01f) rt.sizeDelta = new Vector2(crosshairSize, crosshairSize);
         }
+    }
+
+    void Apply()
+    {
+        ApplyBars();
+        ApplyStaticLook();
+        UpdateCompass();
     }
 }
