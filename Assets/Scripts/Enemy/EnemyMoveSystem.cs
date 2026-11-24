@@ -172,8 +172,12 @@ internal sealed class EnemyMoveSystem
 
     public static IG88EdgeKind EdgeKindOf(int a, int b)
     {
-        foreach (Edge e in Edges)
+        // Use index-based loop to avoid heap-allocating an enumerator over a struct array.
+        for (int i = 0; i < Edges.Length; i++)
+        {
+            Edge e = Edges[i];
             if ((e.a == a && e.b == b) || (e.a == b && e.b == a)) return e.kind;
+        }
         return IG88EdgeKind.Yellow;
     }
 
@@ -217,24 +221,27 @@ internal sealed class EnemyMoveSystem
         return a >= 0;
     }
 
+    // Reusable queue avoids allocating a new one per droid spawn.
+    static readonly Queue<int> hopQueue = new Queue<int>();
+
     /// <summary>Number of connections from 'start' to every waypoint, walking only along the patrol network of one route (its own colour + the yellow connections).</summary>
     public static int[] RouteHops(IG88Route r, int start)
     {
         int[] hops = new int[nodes.Length];
         for (int i = 0; i < hops.Length; i++) hops[i] = 999;
-        Queue<int> q = new Queue<int>();
+        hopQueue.Clear();
         hops[start] = 0;
-        q.Enqueue(start);
-        while (q.Count > 0)
+        hopQueue.Enqueue(start);
+        while (hopQueue.Count > 0)
         {
-            int n = q.Dequeue();
+            int n = hopQueue.Dequeue();
             List<IG88Link> ls = links[n];
             for (int i = 0; i < ls.Count; i++)
             {
                 bool ok = PatrolEdgeMatches(r, ls[i].kind);
                 if (!ok || hops[ls[i].node] != 999) continue;
                 hops[ls[i].node] = hops[n] + 1;
-                q.Enqueue(ls[i].node);
+                hopQueue.Enqueue(ls[i].node);
             }
         }
         return hops;

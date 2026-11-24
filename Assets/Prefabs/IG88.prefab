@@ -956,6 +956,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: IG88
       objectReference: {fileID: 0}
+    - target: {fileID: -927199367670048503, guid: 9e1f753e84c63c5b8176ba2020f14194, type: 3}
+      propertyPath: m_TagString
+      value: Droid
+      objectReference: {fileID: 0}
     - target: {fileID: 2512878663927567463, guid: 9e1f753e84c63c5b8176ba2020f14194, type: 3}
       propertyPath: m_UpdateWhenOffscreen
       value: 1
@@ -1037,9 +1041,10 @@ MonoBehaviour:
   maxFireAngle: 35
   drawGizmos: 1
   patrolSound: {fileID: 707148088941915690}
-  patrolSoundInterval: 3.3
+  patrolSoundGap: 3
   detectSound: {fileID: 7218571657431159877}
   fireSound: {fileID: 1200616358222393526}
+  fireSoundGap: 3
   footstepSound: {fileID: 6666147798571807053}
   deathSound: {fileID: 7833275173259695970}
   sameSoundGap: 0.08

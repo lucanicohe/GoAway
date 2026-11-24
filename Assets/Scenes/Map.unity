@@ -465,7 +465,7 @@ MonoBehaviour:
   sparkMaterialGreen: {fileID: 2100000, guid: 6fb5ccfcb66a7cc6244b5c21f7a387b7, type: 2}
   sparkMaterialWhite: {fileID: 2100000, guid: 37494d6e74e64cbe1c40ca603e705780, type: 2}
   impactFlashMaterial: {fileID: 2100000, guid: ee2f47e9a5f4c34291de4e19dd86c63d, type: 2}
-  logHits: 1
+  logHits: 0
   logMisses: 0
   drawShotLines: 0
 --- !u!1 &68513789

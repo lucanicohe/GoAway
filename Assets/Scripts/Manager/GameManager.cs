@@ -641,7 +641,7 @@ public class GameManager : MonoBehaviour
         List<string> missing = new List<string>();
         Transform[] waypoints = { g1, g2, g3, g4, g5, g6, r1, r2, r3, r4, r5 };
         if (!EnemyMoveSystem.SetWaypoints(waypoints, missing))
-            Debug.LogError("[GameManager] Waypoints not assigned: " + string.Join(", ", missing.ToArray()) +
+            Debug.LogError("[GameManager] Waypoints not assigned: " + string.Join(", ", missing) +
                            ". No IG-88 droids will spawn until all 11 are dragged in.", this);
     }
 
@@ -854,6 +854,22 @@ public class GameManager : MonoBehaviour
         mr.receiveShadows = false;
     }
 
+    // Tag-based fast exclusion for the LOS check — avoids GetComponentInParent for every hit.
+    // The IG-88 and Flathead prefab roots (or their collider objects) should carry the "Droid" tag.
+    // Falls back to component walk for scenes without the tag.
+    static bool IsEnemyCollider(Collider c)
+    {
+        Transform t = c.transform;
+        while (t != null)
+        {
+            if (t.CompareTag("Droid")) return true;
+            t = t.parent;
+        }
+        // Fallback for scenes that have not set up the "Droid" tag yet.
+        return c.GetComponentInParent<IG88Controller>() != null
+            || c.GetComponentInParent<FlatheadEnemy>() != null;
+    }
+
     /// <summary>
     /// True if a droid bolt flying from 'origin' to 'target' (the player) would hit the player first,
     /// i.e. no wall or other obstacle is in the way. Uses the same sphere-cast as IG88Bolt and ignores
@@ -872,8 +888,7 @@ public class GameManager : MonoBehaviour
         {
             Collider c = losHits[i].collider;
             if (c == null) continue;
-            if (c.GetComponentInParent<IG88Controller>() != null) continue;   // droid bodies are ignored by the bolt too
-            if (c.GetComponentInParent<FlatheadEnemy>() != null) continue;    // Flathead bodies as well
+            if (IsEnemyCollider(c)) continue;   // droid and Flathead bodies are ignored by the bolt too
             if (losHits[i].distance < bestDist) { bestDist = losHits[i].distance; first = c; }
         }
 
@@ -970,7 +985,7 @@ public class GameManager : MonoBehaviour
         List<string> missing = new List<string>();
         Transform[] waypoints = { w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, t1, t2, t3, t4, t5, t6, t7 };
         if (!FlatheadMoveSystem.SetWaypoints(waypoints, missing, flatheadPictureUp, flatheadSurfaceOffset) && flatheadCount > 0 && flatheadPrefab != null)
-            Debug.LogError("[GameManager] Flathead waypoints not assigned: " + string.Join(", ", missing.ToArray()) +
+            Debug.LogError("[GameManager] Flathead waypoints not assigned: " + string.Join(", ", missing) +
                            ". No Flatheads will spawn until all 20 are dragged in.", this);
     }
 

@@ -215,8 +215,12 @@ internal sealed class FlatheadMoveSystem
 
     public static FlatheadEdgeKind EdgeKindOf(int a, int b)
     {
-        foreach (Edge e in Edges)
+        // Use index-based loop to avoid heap-allocating an enumerator over a struct array.
+        for (int i = 0; i < Edges.Length; i++)
+        {
+            Edge e = Edges[i];
             if ((e.a == a && e.b == b) || (e.a == b && e.b == a)) return e.kind;
+        }
         return FlatheadEdgeKind.Walk;
     }
 
@@ -254,23 +258,26 @@ internal sealed class FlatheadMoveSystem
         return a >= 0;
     }
 
+    // Reusable queue avoids allocating a new one per robot spawn.
+    static readonly Queue<int> hopQueue = new Queue<int>();
+
     /// <summary>Number of connections from 'start' to every waypoint.</summary>
     static int[] Hops(int start)
     {
         int[] hops = new int[NodeTotal];
         for (int i = 0; i < hops.Length; i++) hops[i] = 999;
-        Queue<int> q = new Queue<int>();
+        hopQueue.Clear();
         hops[start] = 0;
-        q.Enqueue(start);
-        while (q.Count > 0)
+        hopQueue.Enqueue(start);
+        while (hopQueue.Count > 0)
         {
-            int n = q.Dequeue();
+            int n = hopQueue.Dequeue();
             List<FlatheadLink> ls = links[n];
             for (int i = 0; i < ls.Count; i++)
             {
                 if (hops[ls[i].node] != 999) continue;
                 hops[ls[i].node] = hops[n] + 1;
-                q.Enqueue(ls[i].node);
+                hopQueue.Enqueue(ls[i].node);
             }
         }
         return hops;
