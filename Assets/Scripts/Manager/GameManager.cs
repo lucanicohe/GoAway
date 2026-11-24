@@ -8,9 +8,8 @@ using FlatheadRobotKit;
 [DefaultExecutionOrder(-50)] // runs before most player scripts
 public class GameManager : MonoBehaviour
 {
-    // One droid per spawn / patrol waypoint is the physical maximum: there are 11 waypoints (G1-G6, R1-R5), but G3, G4 and R3
-    // are chase-only (droids never spawn or patrol there), which leaves 8: G1, G2, G5, G6, R1, R2, R4, R5.
-    public const int MaxDroids = 8;
+    // Eight stationary guard posts (NEW1-NEW8) plus six separate patrol segments.
+    public const int MaxDroids = 14;
 
     // One Flathead per waypoint is the physical maximum: 20 waypoints (W1-W13 on the walls, T1-T7 on the ceiling).
     public const int MaxFlatheads = 20;
@@ -66,7 +65,7 @@ public class GameManager : MonoBehaviour
     // =====================================================================
 
     [Header("IG-88 Master Switches (work live while playing)")]
-    [Tooltip("Droids (IG-88 AND Flatheads) will NOT chase, target or shoot the player. They keep patrolling normally.")]
+    [Tooltip("Droids (IG-88 AND Flatheads) will NOT chase, target or shoot the player. Patrol droids keep moving on their routes; stationary IG-88 guards stay at their posts.")]
     [SerializeField] private bool droidOff = false;
     [Tooltip("Droids (IG-88 AND Flatheads) stand completely still and do nothing (no patrol, no chase, no aiming, no shooting). Overrides Droid Off.")]
     [SerializeField] private bool droidPatrolOff = false;
@@ -74,7 +73,7 @@ public class GameManager : MonoBehaviour
     [Header("IG-88 Spawning")]
     [Tooltip("Drag your IG88 prefab here (it must have the IG88Controller on its root).")]
     [SerializeField] private IG88Controller ig88Prefab;
-    [Tooltip("How many droids to spawn. Max = 8 (one per spawn / patrol waypoint: G1, G2, G5, G6, R1, R2, R4, R5. G3, G4 and R3 are chase-only). They alternate: green patrol, red patrol, green, red ... Every start one droid stands on G2 and one on R2; the rest are spread out on free waypoints.")]
+    [Tooltip("How many droids to spawn. Max = 14: eight stationary guard posts (NEW1-NEW8) and six patrol segments. Each Play start randomly selects unique posts/routes, favoring locations farther from droids already placed.")]
     [Range(0, MaxDroids)]
     [SerializeField] private int droidCount = 4;
 
@@ -97,21 +96,20 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float headHitMargin = 0.05f;
 
     [Header("IG-88 Detection / Chase")]
-    [Tooltip("Detection radius = CLOSE QUARTERS only, and ONLY after the droid has already SEEN the player once. Before its first sighting a droid " +
-             "detects the Player (tag 'Player') by SIGHT only, this radius does nothing. After it has seen him and lost sight, it also senses him inside " +
-             "this distance (through walls, from behind ...), but only for 'Lose Sight Time' seconds after it last SAW him. After that it forgets him and " +
-             "has to SEE him again. Keep it small, e.g. 4-6 m.")]
+    [Tooltip("For patrol droids: close-range detection through walls, but only after the droid has already seen the player, and only for 'Lose Sight Time'. " +
+             "Stationary NEW1-NEW8 guards instead use their separate Guard Detection Radius, even before seeing the player.")]
     [FormerlySerializedAs("chaseRadius")]   // keeps the value you already set in the Inspector
     [Min(0f)]
     [SerializeField] private float detectionRadius = 5f;
-    [Tooltip("SIGHT: a droid detects the Player the moment it can SEE him (clear line of sight, no wall in between) closer than this, " +
-             "and it shoots him as long as it sees him. Sight is the ONLY way a droid detects the player for the first time. " +
-             "This is also how far droids shoot.")]
+    [Tooltip("Extra close-range detection used only by stationary NEW1-NEW8 guards. They can notice the player through walls inside this radius, even before seeing him. Default = 9 m.")]
+    [Min(0f)]
+    [SerializeField] private float stationaryGuardDetectionRadius = 9f;
+    [Tooltip("SIGHT: a patrol droid detects the player when it has a clear line of sight within this range, and it shoots while it sees him. " +
+             "Stationary guards may also detect the player through walls inside their separate short Guard Detection Radius. This is how far droids shoot.")]
     [Min(0f)]
     [SerializeField] private float sightRange = 40f;
-    [Tooltip("Seconds a chasing droid keeps chasing after it last SAW the player (the timer counts from the last sight, the Detection Radius does " +
-             "not extend it). Then it gives up, forgets him and goes back to its patrol; to chase again it has to SEE him. " +
-             "While the timer runs it still walks toward him around corners.")]
+    [Tooltip("Seconds a droid stays aware after it last saw the player (or, for a guard, last sensed him inside Guard Detection Radius). Then it gives up " +
+             "and returns to its patrol route or guard post. Patrol droids still need sight to start a new chase; guards can detect again inside their radius.")]
     [Min(0f)]
     [SerializeField] private float loseSightTime = 10f;
 
@@ -149,8 +147,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float droidBoltLightRange = 5f;
 
     [Header("IG-88 Patrol")]
-    [Tooltip("Every droid patrols around the waypoint it spawned on. It only walks to waypoints at most this many connections away from its home. " +
-             "1 = very small zone, 2 = natural, 4+ = roams almost the whole route.")]
+    [Tooltip("Maximum route hops from a droid's spawn point. Each new patrol segment is one hop long, so 1 or more allows it to patrol the full segment.")]
     [Range(1, 6)]
     [SerializeField] private int patrolZoneSize = 2;
 
@@ -158,20 +155,30 @@ public class GameManager : MonoBehaviour
     [Tooltip("Droids never get closer than this to each other. A droid that would break this waits until the other one moves.")]
     [SerializeField] private float minDroidDistance = 1.5f;
 
-    [Header("Waypoints - GREEN patrol (drag empty objects here)")]
+    [Header("Waypoints - GREEN side patrols (drag empty objects here)")]
     [SerializeField] private Transform g1;
     [SerializeField] private Transform g2;
-    [SerializeField] private Transform g3;   // shared with the red patrol
+    [SerializeField] private Transform g3;   // retained as a scene waypoint; not used by the new patrols
     [SerializeField] private Transform g4;
     [SerializeField] private Transform g5;
     [SerializeField] private Transform g6;
 
-    [Header("Waypoints - RED patrol (drag empty objects here)")]
+    [Header("Waypoints - RED side patrols (drag empty objects here)")]
     [SerializeField] private Transform r1;
     [SerializeField] private Transform r2;
     [SerializeField] private Transform r3;
     [SerializeField] private Transform r4;
     [SerializeField] private Transform r5;
+
+    [Header("Waypoints - STATIONARY GUARD POSTS (NEW1-NEW8)")]
+    [SerializeField] private Transform new1;
+    [SerializeField] private Transform new2;
+    [SerializeField] private Transform new3;
+    [SerializeField] private Transform new4;
+    [SerializeField] private Transform new5;
+    [SerializeField] private Transform new6;
+    [SerializeField] private Transform new7;
+    [SerializeField] private Transform new8;
 
     [Header("IG-88 Debug")]
     [SerializeField] private bool drawWaypointGizmos = true;
@@ -180,8 +187,8 @@ public class GameManager : MonoBehaviour
     //  FLATHEAD ROBOTS (four-legged turrets on the walls and the ceiling)
     //  They use the same detection / aim settings as the droids above (Sight Range, Detection Radius, Lose Sight Time,
     //  Droid Accuracy, Droid Bolt Speed, Droid Off, Droid Patrol Off). Their damage and fire rate are their own (Flathead Weapon).
-    //  They are SNEAKY (see 'Flathead Stealth'): hidden by their own stealth material, one at a time creeps up on the player, dodges one look but
-    //  keeps chasing, then strikes immediately after a long stare or a second quick look.
+    //  They are SNEAKY (see 'Flathead Stealth'): one at a time hunts the player, but any Flathead under the player's crosshair immediately
+    //  dodges and can fire in self-defense while moving.
     // =====================================================================
 
     [Header("Flathead Spawning")]
@@ -203,7 +210,7 @@ public class GameManager : MonoBehaviour
     [Tooltip("Health the player loses per Flathead bolt that hits him. (The IG-88 droids have their own 'Droid Damage'.)")]
     [Min(0f)]
     [SerializeField] private float flatheadDamage = 6f;
-    [Tooltip("AUTOMATIC FIRE: bolts per second while a Flathead strikes. A strike fires 'Flathead Shots Per Strike' bolts at this rate, so 9 shots at 25 per second is a burst of about 0.4 seconds. " +
+    [Tooltip("AUTOMATIC FIRE: bolts per second while a Flathead strikes. It keeps firing at this rate until its finite shot limit is reached. " +
              "(The IG-88 droids use 'Droid Fire Rate'.) Works at any frame rate.")]
     [Range(1f, 60f)]
     [SerializeField] private float flatheadFireRate = 25f;
@@ -216,10 +223,20 @@ public class GameManager : MonoBehaviour
     [Min(0f)]
     [SerializeField] private float flatheadBoltLightRange = 5f;
 
+    [Header("IG-88 + Flathead Bolt Audio")]
+    [Tooltip("Optional short seamless loop played in 3D while IG-88 and Flathead bolts are flying.")]
+    [SerializeField] private AudioClip enemyBoltFlightLoop;
+    [Tooltip("Played in 3D at the impact point when an IG-88 or Flathead bolt hits any collider.")]
+    [SerializeField] private AudioClip enemyBoltImpactSound;
+    [SerializeField, Range(0f, 1f)] private float enemyBoltFlightVolume = 0.45f;
+    [SerializeField, Range(0f, 1f)] private float enemyBoltImpactVolume = 0.8f;
+    [SerializeField, Min(0.1f)] private float enemyBoltAudioMinDistance = 1f;
+    [SerializeField, Min(1f)] private float enemyBoltAudioMaxDistance = 35f;
+
     [Header("Flathead Movement")]
     [Tooltip("Walk animation speed (full step cycles per second). The walking speed in m/s is Stride Length x Steps Per Second / 0.55, so the feet never slide.")]
     [Range(0.3f, 4f)]
-    [SerializeField] private float flatheadStepsPerSecond = 1.4f;
+    [SerializeField] private float flatheadStepsPerSecond = 1.8f;
     [Tooltip("Length of one step in metres.")]
     [Range(0.05f, 0.5f)]
     [SerializeField] private float flatheadStrideLength = 0.30f;
@@ -235,31 +252,28 @@ public class GameManager : MonoBehaviour
     [Tooltip("Flatheads never get closer than this to each other. One that would break this waits until the other one moves.")]
     [SerializeField] private float minFlatheadDistance = 0.5f;
 
-    [Header("Flathead Stealth (sneaky droid: hides, creeps up one at a time, briefly dodges a look, attacks after repeated or long looks)")]
+    [Header("Flathead Stealth and Evasion")]
     [Tooltip("A Flathead closer than this to the player (metres) senses him even WITHOUT a line of sight, through walls, like a mosquito smelling you. " +
              "Whenever ONE Flathead sees or senses the player, ALL Flatheads are alerted for 'Lose Sight Time' seconds and the next one comes, " +
              "even one that never saw him. 0 = sight only.")]
     [Min(0f)]
     [SerializeField] private float flatheadSenseRadius = 15f;
-    [Tooltip("Walking speed while it creeps up on the player, as a multiple of the normal walking speed. 1 = normal, 0.5 = half as fast.")]
-    [Range(0.2f, 1.5f)]
-    [SerializeField] private float flatheadSneakSpeed = 0.7f;
-    [Tooltip("Walking speed (and jump speed) while it briefly dodges a look or runs after its burst, as a multiple of normal speed.")]
-    [Range(1f, 5f)]
-    [SerializeField] private float flatheadFleeSpeed = 2.5f;
+    [Tooltip("Maximum distance where the player's center-screen shot ray can trigger a Flathead to evade and defend itself.")]
+    [Min(0f)]
+    [SerializeField] private float flatheadAimThreatRange = 200f;
+    [Tooltip("Walking and jump speed while it closes in on the player, as a multiple of normal speed. 2 = twice as fast.")]
+    [Range(2f, 3f)]
+    [SerializeField] private float flatheadSneakSpeed = 2f;
+    [Tooltip("Walking speed (and jump speed) while it evades, flees during an attack, or runs after its burst.")]
+    [Range(3.5f, 5f)]
+    [SerializeField] private float flatheadFleeSpeed = 3.5f;
     [Tooltip("It stops and strikes when it is this close to the player (metres) and has a clear shot. If the track doesn't let it get that close, it strikes from the closest point it can reach.")]
     [Min(0.5f)]
     [SerializeField] private float flatheadStrikeDistance = 6f;
-    [Tooltip("Bolts in one automatic burst (fired at 'Flathead Fire Rate'), then it runs away (hit and run) and the next Flathead comes. 0 = no automatic run after a finite burst.")]
+    [Tooltip("Bolts in one attack before it runs away. Set to 0 or 99+ for unlimited shots. With a finite limit, it runs after its burst and the next Flathead comes.")]
     [Min(0)]
-    [SerializeField] private int flatheadShotsPerStrike = 9;
-    [Tooltip("The player 'looks at' a Flathead when it is within this many degrees of the centre of the screen (and nothing solid is in between). Works however well its stealth material hides it. 0 = gaze reactions off.")]
-    [Range(0f, 45f)]
-    [SerializeField] private float flatheadGazeAngle = 15f;
-    [Tooltip("Seconds the player must keep looking at a Flathead before it attacks immediately. Looks under 0.5 seconds are ignored; a second look within 3 seconds also makes it attack. Minimum is 2 seconds.")]
-    [Range(2f, 5f)]
-    [SerializeField] private float flatheadGazeTime = 2f;
-    [Tooltip("Seconds a Flathead stays away after it finishes its burst and runs. A brief reaction to being seen keeps the current Flathead chasing.")]
+    [SerializeField] private int flatheadShotsPerStrike = 99;
+    [Tooltip("Seconds a Flathead stays away after a finite burst. Aim evasion is brief and does not remove the active hunter.")]
     [Min(0f)]
     [SerializeField] private float flatheadRetreatTime = 12f;
     [Tooltip("Pause (seconds) between one Flathead giving up / running / dying and the next one being sent.")]
@@ -301,8 +315,8 @@ public class GameManager : MonoBehaviour
     [Tooltip("Scene view: red line = WALK connection, blue line = JUMP connection, green stick at every waypoint = direction away from the surface (the robot's back, its feet are on the surface).")]
     [SerializeField] private bool drawFlatheadGizmos = true;
 
-    // The waypoint graph (all connections, routes, shortest paths, closest point on the track) lives in EnemyMoveSystem.
-    // This GameManager only keeps the 11 waypoint objects you drag in above and hands them over in BuildGraph().
+    // The waypoint graph, routes, shortest paths, and closest-track queries live in EnemyMoveSystem.
+    // This GameManager keeps the IG-88 and Flathead waypoint objects and hands them over to their movement systems.
     float nextGraphRebuild;
 
     readonly List<IG88Controller> droids = new List<IG88Controller>();
@@ -311,7 +325,9 @@ public class GameManager : MonoBehaviour
     FlatheadEnemy flatheadHunter;  // the ONE Flathead that is going after the player right now (the others lurk)
     float nextFlatheadHunterTime;  // the next one is not sent before this time
     float flatheadAlertUntil;      // while Time.time is below this, ALL Flatheads know where the player is (somebody saw / sensed him recently)
-    UnityEngine.Camera gazeCamera; // the player's eyes (main camera): the Flatheads run when he looks at them
+    UnityEngine.Camera gazeCamera; // camera whose center-screen shot ray detects a Flathead under aim
+    FlatheadEnemy aimedFlatheadThisFrame;
+    int flatheadAimCacheFrame = -1;
     Transform player;
     float nextPlayerSearch;
 
@@ -355,12 +371,14 @@ public class GameManager : MonoBehaviour
     public bool DroidPatrolOff => droidPatrolOff;
     public float HeadHitMargin => headHitMargin;
     public float DetectionRadius => detectionRadius;
+    public float StationaryGuardDetectionRadius => stationaryGuardDetectionRadius;
     public float SightRange => sightRange;
     public float LoseSightTime => loseSightTime;
     public float DroidDamage => droidDamage;
     public float FlatheadDamage => flatheadDamage;
     public float FlatheadFireRate => flatheadFireRate;
     public float FlatheadSenseRadius => flatheadSenseRadius;
+    public float FlatheadAimThreatRange => flatheadAimThreatRange;
 
     /// <summary>True while the Flatheads are alerted: one of them saw or sensed the player less than 'Lose Sight Time' seconds ago.</summary>
     public bool FlatheadsAlerted => Time.time < flatheadAlertUntil;
@@ -368,6 +386,25 @@ public class GameManager : MonoBehaviour
     public void FlatheadAlert() { flatheadAlertUntil = Time.time + loseSightTime; }
     public float DroidFireRate => droidFireRate;
     public float DroidSpreadDegrees => (1f - Mathf.Clamp01(droidAccuracy)) * MaxSpreadDegrees;
+    public AudioClip EnemyBoltImpactSound => enemyBoltImpactSound;
+    public float EnemyBoltImpactVolume => enemyBoltImpactVolume;
+    public float EnemyBoltAudioMinDistance => enemyBoltAudioMinDistance;
+    public float EnemyBoltAudioMaxDistance => enemyBoltAudioMaxDistance;
+
+    public void ConfigureEnemyBoltFlightAudio(AudioSource source)
+    {
+        if (source == null) return;
+        source.clip = enemyBoltFlightLoop;
+        source.loop = true;
+        source.playOnAwake = false;
+        source.spatialBlend = 1f;
+        source.dopplerLevel = 0f;
+        source.rolloffMode = AudioRolloffMode.Logarithmic;
+        source.minDistance = enemyBoltAudioMinDistance;
+        source.maxDistance = Mathf.Max(enemyBoltAudioMinDistance, enemyBoltAudioMaxDistance);
+        source.volume = enemyBoltFlightVolume;
+    }
+
     public float WalkSpeed => walkSpeed;
     public float WalkSteps => walkStepsPerSecond;
     public float TurnSpeed => turnSpeed;
@@ -387,12 +424,10 @@ public class GameManager : MonoBehaviour
     public float FlatheadJumpArc => flatheadJumpArc;
     public int FlatheadPatrolZone => flatheadPatrolZoneSize;
     public Transform FlatheadAimTarget => flatheadAimTarget;
-    public float FlatheadSneakSpeed => flatheadSneakSpeed;
-    public float FlatheadFleeSpeed => flatheadFleeSpeed;
+    public float FlatheadSneakSpeed => Mathf.Max(2f, flatheadSneakSpeed);
+    public float FlatheadFleeSpeed => Mathf.Max(3.5f, flatheadFleeSpeed);
     public float FlatheadStrikeDistance => flatheadStrikeDistance;
     public int FlatheadShotsPerStrike => flatheadShotsPerStrike;
-    public float FlatheadGazeAngle => flatheadGazeAngle;
-    public float FlatheadGazeTime => flatheadGazeTime;
     public float FlatheadRetreatTime => flatheadRetreatTime;
 
     /// <summary>True while the player is moving (position changes), false once he stands still.</summary>
@@ -438,7 +473,10 @@ public class GameManager : MonoBehaviour
     private void OnValidate()
     {
         droidCount = Mathf.Clamp(droidCount, 0, MaxDroids);
+        stationaryGuardDetectionRadius = Mathf.Max(0f, stationaryGuardDetectionRadius);
         flatheadCount = Mathf.Clamp(flatheadCount, 0, MaxFlatheads);
+        flatheadSneakSpeed = Mathf.Clamp(flatheadSneakSpeed, 2f, 3f);
+        flatheadFleeSpeed = Mathf.Clamp(flatheadFleeSpeed, 3.5f, 5f);
     }
 
     private void Awake()
@@ -761,14 +799,14 @@ public class GameManager : MonoBehaviour
     //  IG-88: waypoints (the graph itself lives in EnemyMoveSystem)
     // =====================================================================
 
-    // hands the 11 waypoint objects to the EnemyMoveSystem, which owns all waypoints, connections and paths
+    // hands all 19 waypoint objects to the EnemyMoveSystem, which owns all waypoints, connections and paths
     private void BuildGraph()
     {
         List<string> missing = new List<string>();
-        Transform[] waypoints = { g1, g2, g3, g4, g5, g6, r1, r2, r3, r4, r5 };
+        Transform[] waypoints = { g1, g2, g3, g4, g5, g6, r1, r2, r3, r4, r5, new1, new2, new3, new4, new5, new6, new7, new8 };
         if (!EnemyMoveSystem.SetWaypoints(waypoints, missing))
             Debug.LogError("[GameManager] Waypoints not assigned: " + string.Join(", ", missing) +
-                           ". No IG-88 droids will spawn until all 11 are dragged in.", this);
+                           ". No IG-88 droids will spawn until all 19 are dragged in.", this);
     }
 
     // =====================================================================
@@ -784,40 +822,60 @@ public class GameManager : MonoBehaviour
 
         int count = Mathf.Clamp(droidCount, 0, MaxDroids);
 
-        // Guaranteed start spots: every start one droid stands on G2 (green) and one on R2 (red). G3, G4 and R3 are never used.
-        // With only 1 droid, one of those two spots is used (at random).
-        int[] forcedNodes = { EnemyMoveSystem.G2, EnemyMoveSystem.R2 };
-        IG88Route[] forcedRoutes = { IG88Route.Green, IG88Route.Red };
-        int firstForced = (count == 1 && Random.value < 0.5f) ? 1 : 0;
+        List<DroidSpawnOption> options = new List<DroidSpawnOption>(MaxDroids);
+        for (int i = 0; i < 8; i++)
+            options.Add(new DroidSpawnOption { standingGuard = true, node = EnemyMoveSystem.NEW1 + i });
+        for (int i = 0; i < EnemyMoveSystem.PatrolRoutes.Length; i++)
+            options.Add(new DroidSpawnOption { standingGuard = false, route = EnemyMoveSystem.PatrolRoutes[i], node = -1 });
 
-        for (int i = 0; i < count; i++)
+        List<Vector3> placedPositions = new List<Vector3>(count);
+        HashSet<int> usedPatrolStartNodes = new HashSet<int>();
+        for (int i = 0; i < count && options.Count > 0; i++)
         {
-            IG88Route route = (i % 2 == 0) ? IG88Route.Green : IG88Route.Red;
-            int node = -1;
+            int bestOption = -1;
+            int bestNode = -1;
+            float bestScore = float.MinValue;
 
-            int fi = i + firstForced;
-            if (fi < forcedNodes.Length)
+            for (int o = 0; o < options.Count; o++)
             {
-                int n = forcedNodes[fi];
-                if (NodeFree(n)) { node = n; route = forcedRoutes[fi]; }
+                DroidSpawnOption option = options[o];
+                int candidateNode;
+                float score;
+                if (option.standingGuard)
+                {
+                    candidateNode = option.node;
+                    score = SpawnSpreadScore(EnemyMoveSystem.NodePos(candidateNode), placedPositions);
+                }
+                else
+                {
+                    candidateNode = BestAvailableRouteStart(option.route, usedPatrolStartNodes, placedPositions, out score);
+                    if (candidateNode < 0) continue;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestOption = o;
+                    bestNode = candidateNode;
+                }
             }
-            if (node < 0)
-                node = PickFreeNode(route);
-            if (node < 0)
+
+            if (bestOption < 0)
             {
-                route = (route == IG88Route.Green) ? IG88Route.Red : IG88Route.Green;
-                node = PickFreeNode(route);
-            }
-            if (node < 0)
-            {
-                Debug.LogWarning("[GameManager] No free waypoint left (waypoints closer than 'Min Droid Distance'?). Spawned " + droids.Count + " droids.", this);
+                Debug.LogWarning("[GameManager] Could not find a distinct start point for every requested droid. Spawned " + droids.Count + ".", this);
                 break;
             }
 
-            IG88Controller d = Instantiate(ig88Prefab, EnemyMoveSystem.NodePos(node), ig88Prefab.transform.rotation);
-            d.name = "IG88_" + (i + 1).ToString("00");
+            DroidSpawnOption chosen = options[bestOption];
+            options.RemoveAt(bestOption);
+            if (!chosen.standingGuard) usedPatrolStartNodes.Add(bestNode);
+
+            Vector3 spawnPosition = EnemyMoveSystem.NodePos(bestNode);
+            IG88Controller d = Instantiate(ig88Prefab, spawnPosition, ig88Prefab.transform.rotation);
+            d.name = "IG88_" + (i + 1).ToString("00") + (chosen.standingGuard ? "_Guard" : "_Patrol");
             droids.Add(d);
-            d.Init(this, route, node);
+            d.Init(this, chosen.route, bestNode, chosen.standingGuard);
+            placedPositions.Add(spawnPosition);
             if (cullingManager != null) cullingManager.RegisterEnemy(d);
         }
     }
@@ -835,54 +893,47 @@ public class GameManager : MonoBehaviour
         droids.Clear();
     }
 
-    /// <summary>
-    /// G3, G4 and R3 are chase-only waypoints: droids never spawn or patrol there, but they still walk to them when they chase the player.
-    /// Node numbers follow the waypoint array in BuildGraph (g1..g6 = 0..5, r1..r5 = 6..10), so G3 = 2, G4 = 3, R3 = 8.
-    /// </summary>
+    /// <summary>Legacy helper for the three old middle-room points, no longer used by patrol spawning.</summary>
     public static bool IsChaseOnlyNode(int node)
     {
         return node == 2 || node == 3 || node == EnemyMoveSystem.R3;
     }
 
-    // true if no droid stands within 'Min Droid Distance' of that waypoint
-    private bool NodeFree(int node)
+    private struct DroidSpawnOption
     {
-        Vector3 p = EnemyMoveSystem.NodePos(node);
-        for (int d = 0; d < droids.Count; d++)
-        {
-            if (droids[d] == null) continue;
-            if (Vector3.Distance(droids[d].transform.position, p) < minDroidDistance) return false;
-        }
-        return true;
+        public bool standingGuard;
+        public IG88PatrolRoute route;
+        public int node;
     }
 
-    // picks the free waypoint that is farthest from the droids already placed, so droids start spread out
-    private int PickFreeNode(IG88Route route)
+    // Select an unused endpoint for this route, preferring the one furthest from existing spawns.
+    private int BestAvailableRouteStart(IG88PatrolRoute route, HashSet<int> usedNodes, List<Vector3> placed, out float score)
     {
-        int[] list = EnemyMoveSystem.RouteNodes(route);
-        int best = -1;
-        float bestScore = -1f;
-        for (int i = 0; i < list.Length; i++)
+        int[] endpoints = EnemyMoveSystem.RouteNodes(route);
+        int bestNode = -1;
+        score = float.MinValue;
+        for (int i = 0; i < endpoints.Length; i++)
         {
-            if (IsChaseOnlyNode(list[i])) continue;                       // G3, G4, R3: no spawning there
-            if (EnemyMoveSystem.IsNoPatrolNode(list[i])) continue;
-            Vector3 p = EnemyMoveSystem.NodePos(list[i]);
-            float nearest = float.MaxValue;
-            bool taken = false;
-            for (int d = 0; d < droids.Count; d++)
+            int node = endpoints[i];
+            if (usedNodes.Contains(node)) continue;
+            float candidateScore = SpawnSpreadScore(EnemyMoveSystem.NodePos(node), placed);
+            if (candidateScore > score)
             {
-                if (droids[d] == null) continue;
-                float dd = Vector3.Distance(droids[d].transform.position, p);
-                if (dd < minDroidDistance) { taken = true; break; }
-                nearest = Mathf.Min(nearest, dd);
+                score = candidateScore;
+                bestNode = node;
             }
-            if (taken) continue;
-
-            // farthest from everybody wins, a little randomness so it isn't identical every start
-            float score = (nearest == float.MaxValue ? 0f : nearest) + Random.value * 0.5f;
-            if (score > bestScore) { bestScore = score; best = list[i]; }
         }
-        return best;
+        return bestNode;
+    }
+
+    // Farthest-point placement spreads a partial set across the scene; random jitter changes each Play start.
+    private float SpawnSpreadScore(Vector3 point, List<Vector3> placed)
+    {
+        if (placed.Count == 0) return Random.value;
+        float nearest = float.MaxValue;
+        for (int i = 0; i < placed.Count; i++)
+            nearest = Mathf.Min(nearest, Vector3.Distance(point, placed[i]));
+        return nearest + Random.Range(0f, 0.5f);
     }
 
     /// <summary>True if another droid is standing close to that waypoint.</summary>
@@ -974,6 +1025,8 @@ public class GameManager : MonoBehaviour
                     0.012f, 0.14f, 0.22f,
                     2.5f, 9f, 0.22f, 0.55f, 9.81f,
                     true, droidRed, 3f, 3.5f);
+            s.ConfigureImpactAudio(enemyBoltImpactSound, enemyBoltImpactVolume,
+                                   enemyBoltAudioMinDistance, enemyBoltAudioMaxDistance);
             droidSparks.Add(s);
         }
     }
@@ -1324,14 +1377,13 @@ public class GameManager : MonoBehaviour
     }
 
     // =====================================================================
-    //  FLATHEAD SNEAK ATTACK: one hunter at a time, and the player's gaze
+    //  FLATHEAD SNEAK ATTACK: one hunter at a time, with direct-aim self-defense
     // =====================================================================
 
     /// <summary>
-    /// Only ONE Flathead goes after the player at a time. While it is stalking, dodging or striking, all the others just lurk.
-    /// As soon as one Flathead has seen or sensed the player, ALL of them are alerted (see FlatheadAlert), so a Flathead that never saw him
-    /// still comes. When the hunter finishes its burst and runs away, gives up or dies, the next one is sent
-    /// after 'Flathead Replace Delay': the closest Flathead that isn't hiding from an earlier scare. Needs no sight of the player.
+    /// Only ONE Flathead is assigned to hunt at a time. Any other Flathead the player directly aims at can evade and fire in self-defense
+    /// without taking over the hunter slot. When the hunter flees after a finite burst, gives up or dies, the next one is sent after
+    /// 'Flathead Replace Delay': the closest Flathead that isn't on cooldown. It does not need a line of sight to be selected.
     /// </summary>
     private void UpdateFlatheadHunter()
     {
@@ -1361,6 +1413,54 @@ public class GameManager : MonoBehaviour
 
         flatheadHunter = best;
         best.StartHunting();
+    }
+
+    /// <summary>True when the player's center-screen shot ray hits this Flathead. Cached so all Flatheads share one raycast per frame.</summary>
+    public bool IsPlayerAimingAt(FlatheadEnemy target)
+    {
+        if (target == null || droidOff || droidPatrolOff || !PlayerAlive)
+            return false;
+
+        if (flatheadAimCacheFrame != Time.frameCount)
+            RefreshFlatheadAimCache();
+
+        return aimedFlatheadThisFrame == target;
+    }
+
+    private void RefreshFlatheadAimCache()
+    {
+        flatheadAimCacheFrame = Time.frameCount;
+        aimedFlatheadThisFrame = null;
+
+        if (flatheadAimThreatRange <= 0f)
+            return;
+        if (gazeCamera == null)
+            gazeCamera = UnityEngine.Camera.main;
+        if (gazeCamera == null)
+            return;
+
+        Ray ray = gazeCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+        int count = Physics.RaycastNonAlloc(ray.origin, ray.direction, losHits, flatheadAimThreatRange,
+                                            ~0, QueryTriggerInteraction.Ignore);
+        int nearest = -1;
+        float nearestDistance = float.MaxValue;
+        for (int i = 0; i < count; i++)
+        {
+            Collider c = losHits[i].collider;
+            if (c == null || IsPlayerCollider(c)) continue;
+            if (losHits[i].distance < nearestDistance)
+            {
+                nearest = i;
+                nearestDistance = losHits[i].distance;
+            }
+        }
+
+        if (nearest >= 0)
+        {
+            FlatheadEnemy flathead = losHits[nearest].collider.GetComponentInParent<FlatheadEnemy>();
+            if (flathead != null && !flathead.IsDead)
+                aimedFlatheadThisFrame = flathead;
+        }
     }
 
     /// <summary>
@@ -1478,16 +1578,16 @@ public class GameManager : MonoBehaviour
     }
 
     // =====================================================================
-    //  IG-88: Scene view gizmos (green / red / yellow connections + names)
+    //  IG-88: Scene view gizmos (the six patrol segments + waypoint names)
     // =====================================================================
 
     private void OnDrawGizmos()
     {
         DrawFlatheadGizmos();
         if (!drawWaypointGizmos) return;
-        Transform[] n = { g1, g2, g3, g4, g5, g6, r1, r2, r3, r4, r5 };
+        Transform[] n = { g1, g2, g3, g4, g5, g6, r1, r2, r3, r4, r5, new1, new2, new3, new4, new5, new6, new7, new8 };
 
-        foreach (EnemyMoveSystem.Edge e in EnemyMoveSystem.Edges)
+        foreach (EnemyMoveSystem.Edge e in EnemyMoveSystem.Connections)
         {
             if (n[e.a] == null || n[e.b] == null) continue;
             Gizmos.color = e.kind == IG88EdgeKind.Green ? Color.green :

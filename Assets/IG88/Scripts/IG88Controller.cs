@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public enum IG88Route { Green, Red }
+public enum IG88PatrolRoute { None, G6ToG5, G5ToG2, G2ToG1, R5ToR4, R4ToR2, R2ToR1 }
 public enum IG88EdgeKind { Green, Red, Yellow }
-public struct IG88Link { public int node; public IG88EdgeKind kind; }
+public struct IG88Link { public int node; public IG88PatrolRoute route; public IG88EdgeKind kind; }
 
 /// <summary>
 /// IG-88 droid BODY. Put this on the droid's root object (the prefab already has it).
@@ -14,8 +14,8 @@ public struct IG88Link { public int node; public IG88EdgeKind kind; }
 ///  - GLOW + LIGHT: green = calm, red = chase.
 ///  - HEALTH + DEATH: headshots do more damage than body hits (see the GameManager). At 0 every rigged part breaks loose and falls to the ground.
 /// WHERE the droid walks and WHEN it detects / chases the player is decided by the EnemyMoveSystem: waypoints only, no NavMesh
-/// (patrol on its own route colour + the yellow connections, sight-only first detection, stop at the closest point of the track to the
-/// player, stop and fire when it has a clear shot, never touch another droid).
+/// (patrol only on its assigned segment, sight detection for patrol droids, close-range sensing for stationary guards, stop and fire when it
+/// has a clear shot, never touch another droid).
 /// </summary>
 [DisallowMultipleComponent]
 [AddComponentMenu("IG88/IG88 Controller")]
@@ -144,6 +144,7 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
     EnemyMoveSystem move;   // waypoint movement + detection of this droid (created in Init)
     bool ready;
     bool wasChasing;        // to notice the moment a chase starts / ends
+    bool silentGuard;       // stationary sentries do not play the repeating patrol voice line
 
     float nextFireTime;
     float patrolNextTime;   // real time (seconds) when the droid may say the patrol line again = end of the last line + Patrol Sound Gap
@@ -221,9 +222,10 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
     }
 
     /// <summary>Called by the GameManager right after spawning.</summary>
-    public void Init(GameManager manager, IG88Route patrolRoute, int startNode)
+    public void Init(GameManager manager, IG88PatrolRoute patrolRoute, int startNode, bool standingGuard = false)
     {
         gm = manager;
+        silentGuard = standingGuard;
         aimAtTarget = false;
         walking = false;
         IsDead = false;
@@ -245,7 +247,7 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
         wallBlocked = false;
         muffleBlend = 0f;
         wallCheckTimer = 0f;
-        move = new EnemyMoveSystem(this, gm, patrolRoute, startNode);   // puts the droid on its start waypoint
+        move = new EnemyMoveSystem(this, gm, patrolRoute, startNode, standingGuard);   // puts the droid on its start waypoint
         if (chaseLight != null) chaseLight.shadows = LightShadows.None;   // a point light with shadows = 6 shadow maps each (the shadow atlas warning)
         SetupGlow();
         UpdateLook(0f);
@@ -773,6 +775,12 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
     {
         if (patrolSound == null) return;
         float now = Time.realtimeSinceStartup;
+        if (silentGuard)
+        {
+            if (patrolSound.isPlaying) patrolSound.Stop();
+            patrolNextTime = now + patrolSoundGap;
+            return;
+        }
         if (chasing || gm.DroidPatrolOff)
         {
             patrolNextTime = now + patrolSoundGap;       // not patrolling: after it the next line comes a full gap later
