@@ -44,9 +44,6 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
     [Header("Shooting")]
     [Tooltip("The robot only fires when its gun points at the player within this many degrees.")]
     [Range(2f, 45f)] public float maxFireAngle = 12f;
-    [Tooltip("Sneak attack: seconds between the robot stopping to strike and its first bolt (it uses them to aim). Gives the player a moment to notice it.")]
-    [Range(0f, 2f)] public float strikeWindup = 0.4f;
-
     [Header("Death: break apart")]
     [Tooltip("How hard the pieces are thrown away when the robot dies.")]
     public float scatterForce = 3f;
@@ -211,7 +208,11 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
         if (striking != wasStriking)
         {
             wasStriking = striking;
-            if (striking) nextFireTime = underAim ? Time.time : Time.time + strikeWindup;
+            if (striking)
+            {
+                float windup = move.HasFiredInHunt ? gm.FlatheadFollowupStrikeDelay : gm.FlatheadInitialStrikeDelay;
+                nextFireTime = underAim ? Time.time : Time.time + windup;
+            }
         }
 
         ctrl.target = gm.FlatheadAimTarget;   // an object that sits on the centre of the player (kept up to date by the GameManager)

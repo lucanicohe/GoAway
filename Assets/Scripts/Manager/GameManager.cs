@@ -267,9 +267,15 @@ public class GameManager : MonoBehaviour
     [Tooltip("Walking speed (and jump speed) while it evades, flees during an attack, or runs after its burst.")]
     [Range(3.5f, 5f)]
     [SerializeField] private float flatheadFleeSpeed = 3.5f;
-    [Tooltip("It stops and strikes when it is this close to the player (metres) and has a clear shot. If the track doesn't let it get that close, it strikes from the closest point it can reach.")]
+    [Tooltip("A Flathead must reach its closest point on the waypoint track, be within this distance of the player, and have a clear shot before it can strike.")]
     [Min(0.5f)]
     [SerializeField] private float flatheadStrikeDistance = 6f;
+    [Tooltip("After first reaching a valid strike position during a hunt, wait this long before the first shot. The Flathead keeps stalking and aiming during the windup.")]
+    [Min(0f)]
+    [SerializeField] private float flatheadInitialStrikeDelay = 1.5f;
+    [Tooltip("Windup before a later strike in the same hunt. Once it starts firing, the automatic fire rate remains aggressive.")]
+    [Min(0f)]
+    [SerializeField] private float flatheadFollowupStrikeDelay = 0.15f;
     [Tooltip("Bolts in one attack before it runs away. Set to 0 or 99+ for unlimited shots. With a finite limit, it runs after its burst and the next Flathead comes.")]
     [Min(0)]
     [SerializeField] private int flatheadShotsPerStrike = 99;
@@ -427,6 +433,8 @@ public class GameManager : MonoBehaviour
     public float FlatheadSneakSpeed => Mathf.Max(2f, flatheadSneakSpeed);
     public float FlatheadFleeSpeed => Mathf.Max(3.5f, flatheadFleeSpeed);
     public float FlatheadStrikeDistance => flatheadStrikeDistance;
+    public float FlatheadInitialStrikeDelay => flatheadInitialStrikeDelay;
+    public float FlatheadFollowupStrikeDelay => flatheadFollowupStrikeDelay;
     public int FlatheadShotsPerStrike => flatheadShotsPerStrike;
     public float FlatheadRetreatTime => flatheadRetreatTime;
 
@@ -500,6 +508,9 @@ public class GameManager : MonoBehaviour
         flatheadCount = Mathf.Clamp(flatheadCount, 0, MaxFlatheads);
         flatheadSneakSpeed = Mathf.Clamp(flatheadSneakSpeed, 2f, 3f);
         flatheadFleeSpeed = Mathf.Clamp(flatheadFleeSpeed, 3.5f, 5f);
+        flatheadStrikeDistance = Mathf.Max(0.5f, flatheadStrikeDistance);
+        flatheadInitialStrikeDelay = Mathf.Max(0f, flatheadInitialStrikeDelay);
+        flatheadFollowupStrikeDelay = Mathf.Max(0f, flatheadFollowupStrikeDelay);
     }
 
     private void Awake()

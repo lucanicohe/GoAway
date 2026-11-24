@@ -375,6 +375,8 @@ internal sealed class FlatheadMoveSystem
     public bool Striking { get { return mode == Mode.Strike; } }
     /// <summary>True while the player's crosshair is on this Flathead.</summary>
     public bool PlayerAimingAt { get { return playerAimingAt; } }
+    /// <summary>True after this hunt has fired its first strike bolt (self-defense shots do not count).</summary>
+    public bool HasFiredInHunt { get { return shotsFired > 0; } }
     /// <summary>It fires during a strike or while defending itself from the player's aim.</summary>
     public bool CanFire { get { return mode == Mode.Strike || playerAimingAt; } }
     /// <summary>True once it has fired a configured finite burst. 0 or 99+ shots means unlimited.</summary>
@@ -629,10 +631,11 @@ internal sealed class FlatheadMoveSystem
                 return;
             }
 
-            // close enough (or as close as the track lets it get) and a clear shot: strike. Never in mid-air.
+            // It must settle at its closest point on the track AND be close enough, with a clear shot, before striking.
+            // Reaching a nearby track point alone is not permission to fire across the room. Never strike in mid-air.
             if (onJump || !seesPlayer || !clearShot) return;
             bool closeEnough = dist <= gm.FlatheadStrikeDistance;
-            if (closeEnough || atClosestPoint) BeginStrike();
+            if (atClosestPoint && closeEnough) BeginStrike();
             return;
         }
 
@@ -921,7 +924,7 @@ internal sealed class FlatheadMoveSystem
             // 1) 1 m from the player: stop
             if (Vector3.Distance(owner.position, player.position) <= CloseDistance) return Standing(dt);
 
-            // 2) at the closest standable point of the track to the player: stop (UpdateMode turns this into a strike)
+            // 2) at the closest standable point of the track to the player: stop; UpdateMode strikes only if the player is also in range.
             if (hasStopPoint && Vector3.Distance(owner.position, stopPoint) <= ArriveEps) return Standing(dt);
         }
 

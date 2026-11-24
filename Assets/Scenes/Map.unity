@@ -41185,7 +41185,7 @@ MonoBehaviour:
   flatheadJumpArc: 0.62
   flatheadPatrolZoneSize: 4
   minFlatheadDistance: 3
-  flatheadSenseRadius: 20
+  flatheadSenseRadius: 15
   flatheadAimThreatRange: 200
   flatheadSneakSpeed: 3
   flatheadFleeSpeed: 5
