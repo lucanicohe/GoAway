@@ -15,6 +15,18 @@ public class GameManager : MonoBehaviour
     // One Flathead per waypoint is the physical maximum: 20 waypoints (W1-W13 on the walls, T1-T7 on the ceiling).
     public const int MaxFlatheads = 20;
 
+    [Header("UniRx Reactive Properties (Event-driven UI & State)")]
+    // Reactive Properties: only execute code when something changes.
+    // The UniRx types are written with their full name on purpose: if another reactive library (R3) is in the project too,
+    // a short name like ReactiveProperty can bind to the wrong one.
+    public readonly UniRx.ReactiveProperty<int> AmmoProperty = new UniRx.ReactiveProperty<int>(30);
+    public readonly UniRx.ReactiveProperty<float> HealthProperty = new UniRx.ReactiveProperty<float>(120f);
+    public readonly UniRx.Subject<float> PlayerDamaged = new UniRx.Subject<float>();
+    private readonly UniRx.CompositeDisposable reactiveSubscriptions = new UniRx.CompositeDisposable();
+
+    [Header("CullingGroup (Frustum Culling & Distance LOD)")]
+    [SerializeField] private EnemyCullingManager cullingManager;
+
     [Header("Ammo")]
     [SerializeField] private int maxAmmo = 30;
     [SerializeField] private int currentAmmo = 30;          // live counter in Inspector
@@ -166,8 +178,10 @@ public class GameManager : MonoBehaviour
 
     // =====================================================================
     //  FLATHEAD ROBOTS (four-legged turrets on the walls and the ceiling)
-    //  They use the same detection / shooting settings as the droids above (Sight Range, Detection Radius, Lose Sight Time,
-    //  Droid Damage, Droid Fire Rate, Droid Accuracy, Droid Bolt Speed, Droid Off, Droid Patrol Off).
+    //  They use the same detection / aim settings as the droids above (Sight Range, Detection Radius, Lose Sight Time,
+    //  Droid Accuracy, Droid Bolt Speed, Droid Off, Droid Patrol Off). Their damage and fire rate are their own (Flathead Weapon).
+    //  They are SNEAKY (see 'Flathead Stealth'): hidden by their own stealth material, one at a time creeps up on the player, dodges one look but
+    //  keeps chasing, then strikes immediately after a long stare or a second quick look.
     // =====================================================================
 
     [Header("Flathead Spawning")]
@@ -184,6 +198,23 @@ public class GameManager : MonoBehaviour
     [Tooltip("A hit this close (metres) to the turret pivot counts as a headshot (unless the prefab has a separate collider on the turret).")]
     [Range(0.05f, 0.6f)]
     [SerializeField] private float flatheadTurretHitRadius = 0.25f;
+
+    [Header("Flathead Weapon (the bolts a Flathead shoots; all work live while playing)")]
+    [Tooltip("Health the player loses per Flathead bolt that hits him. (The IG-88 droids have their own 'Droid Damage'.)")]
+    [Min(0f)]
+    [SerializeField] private float flatheadDamage = 6f;
+    [Tooltip("AUTOMATIC FIRE: bolts per second while a Flathead strikes. A strike fires 'Flathead Shots Per Strike' bolts at this rate, so 9 shots at 25 per second is a burst of about 0.4 seconds. " +
+             "(The IG-88 droids use 'Droid Fire Rate'.) Works at any frame rate.")]
+    [Range(1f, 60f)]
+    [SerializeField] private float flatheadFireRate = 25f;
+    [Tooltip("Colour of the Flathead bolt: its core, its glow and the light on it.")]
+    [SerializeField] private Color flatheadBoltColor = new Color(1f, 0.15f, 0.15f, 1f);
+    [Tooltip("Intensity of the point light on every Flathead bolt.")]
+    [Min(0f)]
+    [SerializeField] private float flatheadBoltLightIntensity = 2f;
+    [Tooltip("Range (metres) of the point light on every Flathead bolt.")]
+    [Min(0f)]
+    [SerializeField] private float flatheadBoltLightRange = 5f;
 
     [Header("Flathead Movement")]
     [Tooltip("Walk animation speed (full step cycles per second). The walking speed in m/s is Stride Length x Steps Per Second / 0.55, so the feet never slide.")]
@@ -203,6 +234,37 @@ public class GameManager : MonoBehaviour
     [SerializeField] private int flatheadPatrolZoneSize = 4;
     [Tooltip("Flatheads never get closer than this to each other. One that would break this waits until the other one moves.")]
     [SerializeField] private float minFlatheadDistance = 0.5f;
+
+    [Header("Flathead Stealth (sneaky droid: hides, creeps up one at a time, briefly dodges a look, attacks after repeated or long looks)")]
+    [Tooltip("A Flathead closer than this to the player (metres) senses him even WITHOUT a line of sight, through walls, like a mosquito smelling you. " +
+             "Whenever ONE Flathead sees or senses the player, ALL Flatheads are alerted for 'Lose Sight Time' seconds and the next one comes, " +
+             "even one that never saw him. 0 = sight only.")]
+    [Min(0f)]
+    [SerializeField] private float flatheadSenseRadius = 15f;
+    [Tooltip("Walking speed while it creeps up on the player, as a multiple of the normal walking speed. 1 = normal, 0.5 = half as fast.")]
+    [Range(0.2f, 1.5f)]
+    [SerializeField] private float flatheadSneakSpeed = 0.7f;
+    [Tooltip("Walking speed (and jump speed) while it briefly dodges a look or runs after its burst, as a multiple of normal speed.")]
+    [Range(1f, 5f)]
+    [SerializeField] private float flatheadFleeSpeed = 2.5f;
+    [Tooltip("It stops and strikes when it is this close to the player (metres) and has a clear shot. If the track doesn't let it get that close, it strikes from the closest point it can reach.")]
+    [Min(0.5f)]
+    [SerializeField] private float flatheadStrikeDistance = 6f;
+    [Tooltip("Bolts in one automatic burst (fired at 'Flathead Fire Rate'), then it runs away (hit and run) and the next Flathead comes. 0 = no automatic run after a finite burst.")]
+    [Min(0)]
+    [SerializeField] private int flatheadShotsPerStrike = 9;
+    [Tooltip("The player 'looks at' a Flathead when it is within this many degrees of the centre of the screen (and nothing solid is in between). Works however well its stealth material hides it. 0 = gaze reactions off.")]
+    [Range(0f, 45f)]
+    [SerializeField] private float flatheadGazeAngle = 15f;
+    [Tooltip("Seconds the player must keep looking at a Flathead before it attacks immediately. Looks under 0.5 seconds are ignored; a second look within 3 seconds also makes it attack. Minimum is 2 seconds.")]
+    [Range(2f, 5f)]
+    [SerializeField] private float flatheadGazeTime = 2f;
+    [Tooltip("Seconds a Flathead stays away after it finishes its burst and runs. A brief reaction to being seen keeps the current Flathead chasing.")]
+    [Min(0f)]
+    [SerializeField] private float flatheadRetreatTime = 12f;
+    [Tooltip("Pause (seconds) between one Flathead giving up / running / dying and the next one being sent.")]
+    [Min(0f)]
+    [SerializeField] private float flatheadReplaceDelay = 2f;
 
     [Header("Flathead Room Layout")]
     [Tooltip("World direction of the TOP of your waypoint drawing (where the arrows at the top of the picture point). Default (0,0,1) = the top of the drawing is world +Z, the right of the drawing is world +X. " +
@@ -246,6 +308,10 @@ public class GameManager : MonoBehaviour
     readonly List<IG88Controller> droids = new List<IG88Controller>();
     readonly List<FlatheadEnemy> flatheads = new List<FlatheadEnemy>();
     Transform flatheadAimTarget;   // sits on the centre of the player: the Flatheads' turrets aim at it
+    FlatheadEnemy flatheadHunter;  // the ONE Flathead that is going after the player right now (the others lurk)
+    float nextFlatheadHunterTime;  // the next one is not sent before this time
+    float flatheadAlertUntil;      // while Time.time is below this, ALL Flatheads know where the player is (somebody saw / sensed him recently)
+    UnityEngine.Camera gazeCamera; // the player's eyes (main camera): the Flatheads run when he looks at them
     Transform player;
     float nextPlayerSearch;
 
@@ -259,14 +325,24 @@ public class GameManager : MonoBehaviour
     Transform playerColliderOwner;
     bool playerWasAlive = true;
 
-    // ----- droid bolt pools (built once in Start, nothing is instantiated while shooting) -----
+    // ----- droid bolt pool (UnityEngine.Pool.ObjectPool: filled once in Start, a bolt goes back to the pool the moment it hits or runs out of range) -----
     Transform droidBoltRoot, droidSparkRoot;
-    readonly List<IG88Bolt> droidBolts = new List<IG88Bolt>();
-    readonly List<Light> droidBoltLights = new List<Light>();
-    readonly List<BlasterHitSparks> droidSparks = new List<BlasterHitSparks>();
-    int nextDroidBolt, nextDroidSpark;
+    UnityEngine.Pool.ObjectPool<IG88Bolt> droidBoltPool;
+    int droidBoltCounter;
+    readonly List<BlasterHitSparks> droidSparks = new List<BlasterHitSparks>();   // spark bursts: fixed ring of 12, the oldest burst is restarted
+    int nextDroidSpark;
     Material boltCoreMat, boltGlowMat, boltGlowOuterMat, sparkRedMat, sparkWhiteMat, flashRedMat;
-    const int DroidBoltPoolSize = 32;
+
+    // ----- Flathead bolt pool: same bolt as the droid's, but its own pool, materials (colour) and light, so it can look and hit differently -----
+    Transform flatheadBoltRoot;
+    UnityEngine.Pool.ObjectPool<IG88Bolt> flatheadBoltPool;
+    int flatheadBoltCounter;
+    Material flatheadCoreMat, flatheadGlowMat, flatheadGlowOuterMat;
+    Color flatheadAppliedColor;
+    const int FlatheadBoltPoolSize = 16;
+    const int FlatheadBoltPoolMax = 128;
+    const int DroidBoltPoolSize = 32;      // bolts made up front
+    const int DroidBoltPoolMax = 256;      // the pool may grow to this many when many droids fire at once
     const int DroidSparkPoolSize = 12;
     const float DroidBoltRange = 200f;
     const float DroidBoltRadius = 0.03f;   // sphere-cast radius of a droid bolt (also used for the line-of-sight check)
@@ -282,6 +358,14 @@ public class GameManager : MonoBehaviour
     public float SightRange => sightRange;
     public float LoseSightTime => loseSightTime;
     public float DroidDamage => droidDamage;
+    public float FlatheadDamage => flatheadDamage;
+    public float FlatheadFireRate => flatheadFireRate;
+    public float FlatheadSenseRadius => flatheadSenseRadius;
+
+    /// <summary>True while the Flatheads are alerted: one of them saw or sensed the player less than 'Lose Sight Time' seconds ago.</summary>
+    public bool FlatheadsAlerted => Time.time < flatheadAlertUntil;
+    /// <summary>A Flathead sees or senses the player right now: every Flathead is alerted for 'Lose Sight Time' seconds from now.</summary>
+    public void FlatheadAlert() { flatheadAlertUntil = Time.time + loseSightTime; }
     public float DroidFireRate => droidFireRate;
     public float DroidSpreadDegrees => (1f - Mathf.Clamp01(droidAccuracy)) * MaxSpreadDegrees;
     public float WalkSpeed => walkSpeed;
@@ -303,6 +387,13 @@ public class GameManager : MonoBehaviour
     public float FlatheadJumpArc => flatheadJumpArc;
     public int FlatheadPatrolZone => flatheadPatrolZoneSize;
     public Transform FlatheadAimTarget => flatheadAimTarget;
+    public float FlatheadSneakSpeed => flatheadSneakSpeed;
+    public float FlatheadFleeSpeed => flatheadFleeSpeed;
+    public float FlatheadStrikeDistance => flatheadStrikeDistance;
+    public int FlatheadShotsPerStrike => flatheadShotsPerStrike;
+    public float FlatheadGazeAngle => flatheadGazeAngle;
+    public float FlatheadGazeTime => flatheadGazeTime;
+    public float FlatheadRetreatTime => flatheadRetreatTime;
 
     /// <summary>True while the player is moving (position changes), false once he stands still.</summary>
     public bool PlayerMoving => Time.time - lastPlayerMoveTime < PlayerMovingGrace;
@@ -358,6 +449,18 @@ public class GameManager : MonoBehaviour
         if (sway == null) sway = FindFirstObjectByType<WalkSprintRotationSway>();
         if (recoil == null) recoil = FindFirstObjectByType<BlasterRecoil>();
 
+        // Initialize reactive properties from Inspector values
+        AmmoProperty.Value = currentAmmo;
+        HealthProperty.Value = playerHealth;
+
+        // Auto-initialize CullingGroup manager
+        if (cullingManager == null)
+        {
+            cullingManager = GetComponent<EnemyCullingManager>();
+            if (cullingManager == null)
+                cullingManager = gameObject.AddComponent<EnemyCullingManager>();
+        }
+
         // blood overlay starts invisible (alpha 0, colour untouched)
         bloodAlphas = new float[bloodImages.Count];
         for (int i = 0; i < bloodAlphas.Length; i++)
@@ -374,17 +477,53 @@ public class GameManager : MonoBehaviour
     private void Start()
     {
         currentAmmo = Mathf.Clamp(currentAmmo, 0, maxAmmo);
-        UpdateAmmoUI();
+        AmmoProperty.Value = currentAmmo;
 
         playerMaxHealth = Mathf.Max(1f, playerMaxHealth);
         playerHealth = Mathf.Clamp(playerHealth, 0f, playerMaxHealth);
-        UpdateHealthUI();
+        HealthProperty.Value = playerHealth;
+
+        // UniRx Reactive Subscriptions — only execute when values change!
+        reactiveSubscriptions.Add(UniRx.ObservableExtensions.Subscribe(AmmoProperty, ammo =>
+        {
+            currentAmmo = ammo;
+            UpdateAmmoUI();
+            if (blaster != null)
+            {
+                bool canShoot = infiniteAmmo || ammo > 0;
+                if (blaster.enabled != canShoot)
+                    blaster.enabled = canShoot;
+            }
+        }));
+
+        reactiveSubscriptions.Add(UniRx.ObservableExtensions.Subscribe(HealthProperty, hp =>
+        {
+            playerHealth = hp;
+            UpdateHealthUI();
+            if (hp <= 0f && playerWasAlive)
+            {
+                playerWasAlive = false;
+                Debug.Log("Player is dead!");
+            }
+            else if (hp > 0f)
+            {
+                playerWasAlive = true;
+            }
+        }));
+
+        reactiveSubscriptions.Add(UniRx.ObservableExtensions.Subscribe(PlayerDamaged, amt =>
+        {
+            if (amt > 0f) ShowBlood();
+        }));
 
         if (blaster != null)
         {
             blaster.Fired += OnWeaponFired;
             blasterWasEnabled = blaster.enabled;
         }
+
+        if (Player != null && cullingManager != null)
+            cullingManager.SetReferencePoint(Player);
 
         BuildDroidPools();
         SpawnDroids();
@@ -427,6 +566,10 @@ public class GameManager : MonoBehaviour
     {
         if (blaster != null)
             blaster.Fired -= OnWeaponFired;
+        reactiveSubscriptions.Dispose();
+        droidBoltPool = null;
+        flatheadBoltPool = null;
+        if (flatheadBoltRoot != null) Destroy(flatheadBoltRoot.gameObject);
         if (droidBoltRoot != null) Destroy(droidBoltRoot.gameObject);
         if (droidSparkRoot != null) Destroy(droidSparkRoot.gameObject);
         if (flatheadAimTarget != null) Destroy(flatheadAimTarget.gameObject);
@@ -437,13 +580,7 @@ public class GameManager : MonoBehaviour
         UpdateBloodFade();
         TrackPlayerMovement();
 
-        // Optional: also block firing when out of ammo by disabling the component temporarily
-        if (blaster != null)
-        {
-            bool canShoot = infiniteAmmo || currentAmmo > 0;
-            if (blaster.enabled != canShoot)
-                blaster.enabled = canShoot;
-        }
+        // Note: blaster.enabled is now reactively managed by AmmoProperty.Subscribe (no per-frame check needed!)
 
         // keep path lengths correct if you move waypoints while playing
         if (Time.time >= nextGraphRebuild)
@@ -455,6 +592,8 @@ public class GameManager : MonoBehaviour
 
         // the Flatheads' turrets aim at this object: keep it on the centre of the player
         if (flatheadAimTarget != null && Player != null) flatheadAimTarget.position = PlayerAimPoint;
+
+        UpdateFlatheadHunter();
     }
 
     // Runs before the droids (execution order -50). The droids ask 'PlayerMoving'.
@@ -462,6 +601,7 @@ public class GameManager : MonoBehaviour
     {
         Transform p = Player;
         if (p == null) { havePlayerPos = false; return; }
+        if (cullingManager != null) cullingManager.SetReferencePoint(p);
         if (!havePlayerPos) { lastPlayerPos = p.position; havePlayerPos = true; return; }
 
         float dt = Time.deltaTime;
@@ -475,10 +615,9 @@ public class GameManager : MonoBehaviour
     {
         if (infiniteAmmo) return;
 
-        currentAmmo = Mathf.Max(0, currentAmmo - 1);
-        UpdateAmmoUI();
+        AmmoProperty.Value = Mathf.Max(0, AmmoProperty.Value - 1);
 
-        if (currentAmmo <= 0)
+        if (AmmoProperty.Value <= 0)
             Debug.Log("Out of ammo!");
     }
 
@@ -558,53 +697,41 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // ---------- Public helpers you can call from other scripts ----------
+    // ---------- Public helpers you can call from other scripts (UniRx Reactive) ----------
 
     public void AddAmmo(int amount)
     {
-        currentAmmo = Mathf.Clamp(currentAmmo + amount, 0, maxAmmo);
-        UpdateAmmoUI();
+        AmmoProperty.Value = Mathf.Clamp(AmmoProperty.Value + amount, 0, maxAmmo);
     }
 
     public void SetAmmo(int amount)
     {
-        currentAmmo = Mathf.Clamp(amount, 0, maxAmmo);
-        UpdateAmmoUI();
+        AmmoProperty.Value = Mathf.Clamp(amount, 0, maxAmmo);
     }
 
-    public int CurrentAmmo => currentAmmo;
+    public int CurrentAmmo => AmmoProperty.Value;
     public int MaxAmmo => maxAmmo;
-    public bool HasAmmo => infiniteAmmo || currentAmmo > 0;
+    public bool HasAmmo => infiniteAmmo || AmmoProperty.Value > 0;
 
-    public float PlayerHealth => playerHealth;
+    public float PlayerHealth => HealthProperty.Value;
     public float PlayerMaxHealth => playerMaxHealth;
-    public bool PlayerAlive => playerHealth > 0f;
+    public bool PlayerAlive => HealthProperty.Value > 0f;
 
     public void DamagePlayer(float amount)
     {
-        if (playerHealth <= 0f) return;
-        playerHealth = Mathf.Clamp(playerHealth - amount, 0f, playerMaxHealth);
-        UpdateHealthUI();
-        if (amount > 0f) ShowBlood();
-        if (playerHealth <= 0f && playerWasAlive)
-        {
-            playerWasAlive = false;
-            Debug.Log("Player is dead!");
-        }
+        if (HealthProperty.Value <= 0f) return;
+        HealthProperty.Value = Mathf.Clamp(HealthProperty.Value - amount, 0f, playerMaxHealth);
+        PlayerDamaged.OnNext(amount);
     }
 
     public void HealPlayer(float amount)
     {
-        playerHealth = Mathf.Clamp(playerHealth + amount, 0f, playerMaxHealth);
-        if (playerHealth > 0f) playerWasAlive = true;
-        UpdateHealthUI();
+        HealthProperty.Value = Mathf.Clamp(HealthProperty.Value + amount, 0f, playerMaxHealth);
     }
 
     public void SetPlayerHealth(float amount)
     {
-        playerHealth = Mathf.Clamp(amount, 0f, playerMaxHealth);
-        if (playerHealth > 0f) playerWasAlive = true;
-        UpdateHealthUI();
+        HealthProperty.Value = Mathf.Clamp(amount, 0f, playerMaxHealth);
     }
 
     // ---------- Soft conflict fix (no rewrite of the two scripts) ----------
@@ -625,8 +752,7 @@ public class GameManager : MonoBehaviour
     {
         if (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
         {
-            currentAmmo = maxAmmo;
-            UpdateAmmoUI();
+            AmmoProperty.Value = maxAmmo;
             Debug.Log("Reloaded!");
         }
     }
@@ -692,13 +818,20 @@ public class GameManager : MonoBehaviour
             d.name = "IG88_" + (i + 1).ToString("00");
             droids.Add(d);
             d.Init(this, route, node);
+            if (cullingManager != null) cullingManager.RegisterEnemy(d);
         }
     }
 
     private void ClearDroids()
     {
         for (int i = droids.Count - 1; i >= 0; i--)
-            if (droids[i] != null) Destroy(droids[i].gameObject);
+        {
+            if (droids[i] != null)
+            {
+                if (cullingManager != null) cullingManager.UnregisterEnemy(droids[i]);
+                Destroy(droids[i].gameObject);
+            }
+        }
         droids.Clear();
     }
 
@@ -765,7 +898,11 @@ public class GameManager : MonoBehaviour
         return false;
     }
 
-    public void Unregister(IG88Controller d) { droids.Remove(d); }
+    public void Unregister(IG88Controller d)
+    {
+        if (cullingManager != null) cullingManager.UnregisterEnemy(d);
+        droids.Remove(d);
+    }
 
     /// <summary>
     /// True if moving 'who' to newPos would bring it closer than minDroidDistance to another droid.
@@ -797,8 +934,35 @@ public class GameManager : MonoBehaviour
         droidBoltRoot = new GameObject("IG88 Bolts").transform;
         droidSparkRoot = new GameObject("IG88 Sparks").transform;
 
-        for (int i = 0; i < DroidBoltPoolSize; i++)
-            droidBolts.Add(CreateDroidBolt(i));
+        droidBoltPool = new UnityEngine.Pool.ObjectPool<IG88Bolt>(
+            createFunc: CreateDroidBolt,
+            actionOnGet: null,
+            actionOnRelease: b => { if (b != null) b.gameObject.SetActive(false); },
+            actionOnDestroy: b => { if (b != null) Destroy(b.gameObject); },
+            collectionCheck: false,
+            defaultCapacity: DroidBoltPoolSize,
+            maxSize: DroidBoltPoolMax);
+
+        // fill the pool now so nothing is created while the first shots are flying
+        IG88Bolt[] warm = new IG88Bolt[DroidBoltPoolSize];
+        for (int i = 0; i < warm.Length; i++) warm[i] = droidBoltPool.Get();
+        for (int i = 0; i < warm.Length; i++) droidBoltPool.Release(warm[i]);
+
+        // the Flathead's own bolt pool
+        EnsureFlatheadMaterials();
+        flatheadBoltRoot = new GameObject("Flathead Bolts").transform;
+        flatheadBoltPool = new UnityEngine.Pool.ObjectPool<IG88Bolt>(
+            createFunc: CreateFlatheadBolt,
+            actionOnGet: null,
+            actionOnRelease: b => { if (b != null) b.gameObject.SetActive(false); },
+            actionOnDestroy: b => { if (b != null) Destroy(b.gameObject); },
+            collectionCheck: false,
+            defaultCapacity: FlatheadBoltPoolSize,
+            maxSize: FlatheadBoltPoolMax);
+
+        IG88Bolt[] warmFlat = new IG88Bolt[FlatheadBoltPoolSize];
+        for (int i = 0; i < warmFlat.Length; i++) warmFlat[i] = flatheadBoltPool.Get();
+        for (int i = 0; i < warmFlat.Length; i++) flatheadBoltPool.Release(warmFlat[i]);
 
         for (int i = 0; i < DroidSparkPoolSize; i++)
         {
@@ -814,29 +978,67 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private IG88Bolt CreateDroidBolt(int index)
+    private IG88Bolt CreateDroidBolt()
+    {
+        return BuildBolt("Droid Bolt " + (droidBoltCounter++), droidBoltRoot, false,
+                         boltCoreMat, boltGlowMat, boltGlowOuterMat,
+                         droidRed, droidBoltLightIntensity, droidBoltLightRange);
+    }
+
+    private IG88Bolt CreateFlatheadBolt()
+    {
+        return BuildBolt("Flathead Bolt " + (flatheadBoltCounter++), flatheadBoltRoot, true,
+                         flatheadCoreMat, flatheadGlowMat, flatheadGlowOuterMat,
+                         flatheadBoltColor, flatheadBoltLightIntensity, flatheadBoltLightRange);
+    }
+
+    private IG88Bolt BuildBolt(string objectName, Transform parent, bool flathead,
+                               Material core, Material glow, Material outer,
+                               Color lightColor, float lightIntensity, float lightRange)
     {
         const float length = 0.7f, radius = 0.028f;
 
-        GameObject root = new GameObject("Droid Bolt " + index);
-        root.transform.SetParent(droidBoltRoot, false);
+        GameObject root = new GameObject(objectName);
+        root.transform.SetParent(parent, false);
         IG88Bolt bolt = root.AddComponent<IG88Bolt>();
-        bolt.Setup(this, DroidBoltRadius);
+        bolt.Setup(this, DroidBoltRadius, flathead);
 
-        MakeBoltCapsule("Core", root.transform, radius, length, boltCoreMat);
-        MakeBoltCapsule("Glow", root.transform, radius * 2.2f, length * 1.15f, boltGlowMat);
-        MakeBoltCapsule("Glow Outer", root.transform, radius * 3.6f, length * 1.4f, boltGlowOuterMat);
+        MakeBoltCapsule("Core", root.transform, radius, length, core);
+        MakeBoltCapsule("Glow", root.transform, radius * 2.2f, length * 1.15f, glow);
+        MakeBoltCapsule("Glow Outer", root.transform, radius * 3.6f, length * 1.4f, outer);
 
         Light l = root.AddComponent<Light>();
         l.type = LightType.Point;
-        l.color = droidRed;
-        l.intensity = droidBoltLightIntensity;
-        l.range = droidBoltLightRange;
+        l.color = lightColor;
+        l.intensity = lightIntensity;
+        l.range = lightRange;
         l.shadows = LightShadows.None;
-        droidBoltLights.Add(l);
 
         root.SetActive(false);
         return bolt;
+    }
+
+    // Flathead bolt materials: the three emission colours are worked out from the one 'Flathead Bolt Color'
+    // (core = brighter and a little whiter, glow = the colour, outer glow = half of it; the default red gives the droid bolt look).
+    private void EnsureFlatheadMaterials()
+    {
+        if (flatheadCoreMat == null) flatheadCoreMat = RedMaterial("Flathead Bolt Core", Color.black, false);
+        if (flatheadGlowMat == null) flatheadGlowMat = RedMaterial("Flathead Bolt Glow", Color.black, true);
+        if (flatheadGlowOuterMat == null) flatheadGlowOuterMat = RedMaterial("Flathead Bolt Glow Outer", Color.black, true);
+        ApplyFlatheadBoltColor(true);
+    }
+
+    private void ApplyFlatheadBoltColor(bool force)
+    {
+        if (flatheadCoreMat == null || flatheadGlowMat == null || flatheadGlowOuterMat == null) return;
+        if (!force && flatheadBoltColor == flatheadAppliedColor) return;   // only touch the materials when the colour really changed
+        flatheadAppliedColor = flatheadBoltColor;
+
+        Color c = flatheadBoltColor;
+        Color whiter = Color.Lerp(c, Color.white, 0.2f);
+        flatheadCoreMat.SetColor("_EmissionColor", new Color(whiter.r * 2.4f, whiter.g * 2.4f, whiter.b * 2.4f, 1f));
+        flatheadGlowMat.SetColor("_EmissionColor", new Color(c.r * 1.1f, c.g * 1.1f, c.b * 1.1f, 1f));
+        flatheadGlowOuterMat.SetColor("_EmissionColor", new Color(c.r * 0.55f, c.g * 0.55f, c.b * 0.55f, 1f));
     }
 
     private void MakeBoltCapsule(string objectName, Transform parent, float radius, float length, Material material)
@@ -854,20 +1056,53 @@ public class GameManager : MonoBehaviour
         mr.receiveShadows = false;
     }
 
-    // Tag-based fast exclusion for the LOS check — avoids GetComponentInParent for every hit.
-    // The IG-88 and Flathead prefab roots (or their collider objects) should carry the "Droid" tag.
-    // Falls back to component walk for scenes without the tag.
-    static bool IsEnemyCollider(Collider c)
+    // ----- "is this collider part of a droid / Flathead?" (used by the line-of-sight check AND by the droid bolts) -----
+    // Fast path: the IG-88 and Flathead prefab roots carry the "Droid" tag. The answer is remembered per collider, so the
+    // tag walk / component walk happens ONCE per collider and every later hit is a dictionary lookup.
+    // CompareTag throws when the tag does not exist in the project, so that is tested once (try / catch) and the tag is skipped if missing.
+    const string EnemyTag = "Droid";
+    static int enemyTagState;                                        // 0 = not checked yet, 1 = the tag exists, -1 = it does not
+    static readonly Dictionary<Collider, bool> enemyColliderCache = new Dictionary<Collider, bool>(128);
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetEnemyStatics()
     {
-        Transform t = c.transform;
-        while (t != null)
+        enemyTagState = 0;
+        enemyColliderCache.Clear();
+    }
+
+    static bool EnemyTagExists(Transform probe)
+    {
+        if (enemyTagState == 0)
         {
-            if (t.CompareTag("Droid")) return true;
-            t = t.parent;
+            try { probe.CompareTag(EnemyTag); enemyTagState = 1; }
+            catch (UnityException) { enemyTagState = -1; }
         }
-        // Fallback for scenes that have not set up the "Droid" tag yet.
-        return c.GetComponentInParent<IG88Controller>() != null
-            || c.GetComponentInParent<FlatheadEnemy>() != null;
+        return enemyTagState == 1;
+    }
+
+    public static bool IsEnemyCollider(Collider c)
+    {
+        if (c == null) return false;
+
+        bool result;
+        if (enemyColliderCache.TryGetValue(c, out result)) return result;
+
+        result = false;
+        Transform t = c.transform;
+        if (EnemyTagExists(t))
+        {
+            for (Transform p = t; p != null; p = p.parent)
+            {
+                if (p.CompareTag(EnemyTag)) { result = true; break; }
+            }
+        }
+        if (!result)   // scenes / prefabs without the tag still work
+            result = c.GetComponentInParent<IG88Controller>() != null || c.GetComponentInParent<FlatheadEnemy>() != null;
+
+        if (enemyColliderCache.Count > 4096) enemyColliderCache.Clear();   // destroyed colliders (dead droid pieces) never pile up
+        enemyColliderCache[c] = result;
+        return result;
     }
 
     /// <summary>
@@ -896,18 +1131,30 @@ public class GameManager : MonoBehaviour
         return IsPlayerCollider(first);          // the first thing the bolt would hit must be the player
     }
 
-    /// <summary>A droid shoots: takes the next bolt from the pool.</summary>
+    /// <summary>A droid shoots: takes a bolt from the pool (the pool makes a new one if all are in flight).</summary>
     public void FireDroidBolt(Vector3 origin, Vector3 direction)
     {
-        if (droidBolts.Count == 0) return;
-        IG88Bolt b = droidBolts[nextDroidBolt];
-        if (nextDroidBolt < droidBoltLights.Count && droidBoltLights[nextDroidBolt] != null)
-        {
-            droidBoltLights[nextDroidBolt].intensity = droidBoltLightIntensity;
-            droidBoltLights[nextDroidBolt].range = droidBoltLightRange;
-        }
-        nextDroidBolt = (nextDroidBolt + 1) % droidBolts.Count;
-        b.Launch(origin, direction, droidBoltSpeed, DroidBoltRange, droidDamage);
+        if (droidBoltPool == null) return;
+        IG88Bolt b = droidBoltPool.Get();
+        b.Launch(origin, direction, droidBoltSpeed, DroidBoltRange, droidDamage, droidBoltLightIntensity, droidBoltLightRange, droidRed);
+    }
+
+    /// <summary>A Flathead shoots: its own bolt (damage, colour and light come from the Flathead Weapon section).</summary>
+    public void FireFlatheadBolt(Vector3 origin, Vector3 direction)
+    {
+        if (flatheadBoltPool == null) return;
+        ApplyFlatheadBoltColor(false);
+        IG88Bolt b = flatheadBoltPool.Get();
+        b.Launch(origin, direction, droidBoltSpeed, DroidBoltRange, flatheadDamage, flatheadBoltLightIntensity, flatheadBoltLightRange, flatheadBoltColor);
+    }
+
+    /// <summary>Called by a droid bolt when it has hit something or flown out of range: it goes back to the pool.</summary>
+    public void ReleaseDroidBolt(IG88Bolt bolt)
+    {
+        if (bolt == null) return;
+        UnityEngine.Pool.ObjectPool<IG88Bolt> pool = bolt.IsFlathead ? flatheadBoltPool : droidBoltPool;
+        if (pool != null) pool.Release(bolt);
+        else bolt.gameObject.SetActive(false);
     }
 
     /// <summary>Called by a droid bolt when it hits something.</summary>
@@ -1019,14 +1266,23 @@ public class GameManager : MonoBehaviour
             if (enemy == null) enemy = inst.gameObject.AddComponent<FlatheadEnemy>();
             flatheads.Add(enemy);
             enemy.Init(this, node);   // puts it on the waypoint, in the pose of that waypoint (wall or ceiling)
+            if (cullingManager != null) cullingManager.RegisterEnemy(enemy);
         }
     }
 
     private void ClearFlatheads()
     {
         for (int i = flatheads.Count - 1; i >= 0; i--)
-            if (flatheads[i] != null) Destroy(flatheads[i].gameObject);
+        {
+            if (flatheads[i] != null)
+            {
+                if (cullingManager != null) cullingManager.UnregisterEnemy(flatheads[i]);
+                Destroy(flatheads[i].gameObject);
+            }
+        }
         flatheads.Clear();
+        flatheadHunter = null;
+        flatheadAlertUntil = 0f;
     }
 
     // picks the free waypoint that is farthest from the Flatheads already placed, so they start spread out
@@ -1054,7 +1310,85 @@ public class GameManager : MonoBehaviour
         return best;
     }
 
-    public void UnregisterFlathead(FlatheadEnemy f) { flatheads.Remove(f); }
+    public void UnregisterFlathead(FlatheadEnemy f)
+    {
+        if (cullingManager != null) cullingManager.UnregisterEnemy(f);
+        flatheads.Remove(f);
+
+        // the hunter died: a beat later the next Flathead tries its luck
+        if (flatheadHunter != null && ReferenceEquals(flatheadHunter, f))
+        {
+            flatheadHunter = null;
+            nextFlatheadHunterTime = Time.time + flatheadReplaceDelay;
+        }
+    }
+
+    // =====================================================================
+    //  FLATHEAD SNEAK ATTACK: one hunter at a time, and the player's gaze
+    // =====================================================================
+
+    /// <summary>
+    /// Only ONE Flathead goes after the player at a time. While it is stalking, dodging or striking, all the others just lurk.
+    /// As soon as one Flathead has seen or sensed the player, ALL of them are alerted (see FlatheadAlert), so a Flathead that never saw him
+    /// still comes. When the hunter finishes its burst and runs away, gives up or dies, the next one is sent
+    /// after 'Flathead Replace Delay': the closest Flathead that isn't hiding from an earlier scare. Needs no sight of the player.
+    /// </summary>
+    private void UpdateFlatheadHunter()
+    {
+        if (flatheadHunter != null)
+        {
+            if (!flatheadHunter.IsDead && flatheadHunter.IsHunting) return;   // still at it
+            flatheadHunter = null;
+            nextFlatheadHunterTime = Time.time + flatheadReplaceDelay;        // a beat before the next one comes
+            return;
+        }
+
+        if (Time.time < nextFlatheadHunterTime) return;
+        Transform p = Player;
+        if (p == null || !PlayerAlive || droidOff || droidPatrolOff) return;
+        if (!FlatheadsAlerted) return;   // nobody has seen or sensed the player lately: they all just lurk
+
+        FlatheadEnemy best = null;
+        float bestDist = float.MaxValue;
+        for (int i = 0; i < flatheads.Count; i++)
+        {
+            FlatheadEnemy f = flatheads[i];
+            if (f == null || !f.CanHunt) continue;
+            float d = (f.transform.position - p.position).sqrMagnitude;
+            if (d < bestDist) { bestDist = d; best = f; }
+        }
+        if (best == null) return;
+
+        flatheadHunter = best;
+        best.StartHunting();
+    }
+
+    /// <summary>
+    /// True when the player is LOOKING at a point: it is within maxAngleDegrees of the centre of the screen, closer than maxDistance and
+    /// nothing solid is in between (droid bodies and the player himself don't block the view). Doesn't care how well the thing is hidden.
+    /// </summary>
+    public bool IsPlayerLookingAt(Vector3 point, float maxAngleDegrees, float maxDistance)
+    {
+        if (maxAngleDegrees <= 0f) return false;
+        if (gazeCamera == null) gazeCamera = UnityEngine.Camera.main;   // full name on purpose: a script called "Camera" would hide Unity's Camera
+        if (gazeCamera == null) return false;
+
+        Transform ct = gazeCamera.transform;
+        Vector3 d = point - ct.position;
+        float dist = d.magnitude;
+        if (dist > maxDistance) return false;
+        if (dist < 0.05f) return true;
+        if (Vector3.Angle(ct.forward, d) > maxAngleDegrees) return false;
+
+        int n = Physics.RaycastNonAlloc(ct.position, d / dist, losHits, Mathf.Max(0f, dist - 0.1f), ~0, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < n; i++)
+        {
+            Collider c = losHits[i].collider;
+            if (c == null || IsEnemyCollider(c) || IsPlayerCollider(c)) continue;
+            return false;   // a wall (or anything solid) is in the way
+        }
+        return true;
+    }
 
     /// <summary>True if another Flathead is standing close to that waypoint.</summary>
     public bool FlatheadNodeCrowded(int node, FlatheadEnemy who)

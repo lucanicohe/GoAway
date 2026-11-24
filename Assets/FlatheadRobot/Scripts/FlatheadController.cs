@@ -53,6 +53,30 @@ namespace FlatheadRobotKit
         [Tooltip("Pause between jumps while the box stays ticked.")]
         [Range(0f, 2f)] public float jumpPause = 0.35f;
 
+        [Header("Sound (drag the AudioSources from inside the prefab here)")]
+        [Tooltip("Noise sound. Plays again and again whatever the robot does (walking, standing, jumping, shooting) and stops when it dies. Untick 'Play On Awake' on the AudioSource.")]
+        public AudioSource noiseSource;
+        [Tooltip("Seconds of silence AFTER the noise sound has fully played, before it plays again.")]
+        [Min(0f)] public float noiseInterval = 3f;
+        [Tooltip("Walking sound. Loops only while the robot walks: it is silent while the robot stands still or jumps, and it stops when it dies. Untick 'Play On Awake' on the AudioSource.")]
+        public AudioSource walkSource;
+        [Tooltip("Fire sound. Plays every time the robot shoots a bolt. Untick 'Play On Awake' on the AudioSource.")]
+        public AudioSource fireSource;
+        [Tooltip("Destruction sound. Plays once when the robot dies (the noise and walking sounds stop at that moment). Untick 'Play On Awake' on the AudioSource.")]
+        public AudioSource destructionSource;
+
+        [Header("Sounds through walls")]
+        [Tooltip("When a wall is between the robot and the player (the camera), all its sounds get quieter and muffled.")]
+        public bool muffleThroughWalls = true;
+        [Tooltip("Which layers count as walls. Default = everything solid. The robot itself, the player and other droids are always ignored. Trigger colliders are ignored too.")]
+        public LayerMask wallMask = ~0;
+        [Tooltip("Volume while a wall blocks the sound (1 = unchanged, 0.4 = 40%).")]
+        [Range(0f, 1f)] public float muffledVolume = 0.4f;
+        [Tooltip("Low pass cutoff in Hz while a wall blocks the sound. Lower = more muffled.")]
+        [Range(200f, 8000f)] public float muffledCutoff = 800f;
+        [Tooltip("Seconds to fade between clear and muffled.")]
+        [Range(0.01f, 1f)] public float muffleFadeTime = 0.15f;
+
         class RigBone { public Transform t; public Vector3 restPos; public Quaternion restRot; }
 
         static readonly string[] LegNames = { "Leg_R_Front", "Leg_L_Rear", "Leg_L_Front", "Leg_R_Rear" };   // first two = one trot pair
@@ -67,6 +91,18 @@ namespace FlatheadRobotKit
         bool ready;
         float phase, walkW, aimW, yaw, pitch, yawVel, pitchVel, jumpU = -1f, nextJump, orbitAngle;
         const float Duty = 0.55f;
+        float noiseWait;          // seconds left until the noise sound plays again (counts down only while it is silent)
+        bool soundsStopped;       // true once the robot has died
+
+        // sounds through walls: one entry per Audio Source (volume + low pass filter get changed while a wall blocks the sound)
+        class SoundMuffle
+        {
+            public AudioSource src;
+            public AudioLowPassFilter lowPass;
+            public float baseVolume;
+        }
+        readonly List<SoundMuffle> muffles = new List<SoundMuffle>();
+        float muffleBlend;        // 0 = clear, 1 = muffled
 
         /// <summary>Direction the robot faces (world, flattened).</summary>
         public Vector3 Forward { get { return Vector3.ProjectOnPlane(transform.TransformDirection(lF), transform.up).normalized; } }
@@ -96,7 +132,9 @@ namespace FlatheadRobotKit
         /// <summary>The turret bone that pans (Gun_Pan).</summary>
         public Transform TurretBone { get { return pan != null ? pan.t : null; } }
 
-        void Awake() { DetectRig(); }
+        void Awake() { DetectRig(); InitSounds(); }
+        void Start() { InitSounds(); }       // again, in case an AudioSource with 'Play On Awake' started after Awake
+        void Update() { UpdateSounds(); }
 
         List<RigBone> allList;
 
@@ -161,8 +199,13 @@ namespace FlatheadRobotKit
             midT.rotation = Quaternion.FromToRotation(c2 - m2, (a + dir * d) - m2) * midT.rotation;
         }
 
+        [Header("Runtime Culling (set by CullingGroup)")]
+        [Tooltip("When true, procedural leg IK and bone rotations are skipped while offscreen.")]
+        public bool cullVisuals = false;
+
         void LateUpdate()
         {
+            if (cullVisuals) return;
             if (!ready && !DetectRig()) return;
             float dt = Time.deltaTime;
 
@@ -257,6 +300,105 @@ namespace FlatheadRobotKit
 
             if (moveWhileWalking && walkW > 0f && jw == 0f)
                 transform.position += transform.TransformDirection(d3) * (WalkSpeed * walkW * dt);
+        }
+
+        // ------------------------------------------------------------------ sound
+
+        // Every sound starts silent. Noise, fire and destruction play once per Play, the walking sound loops while the legs walk.
+        void InitSounds()
+        {
+            soundsStopped = false;
+            if (noiseSource != null) { noiseSource.playOnAwake = false; noiseSource.loop = false; noiseSource.Stop(); }
+            if (walkSource != null) { walkSource.playOnAwake = false; walkSource.loop = true; walkSource.Stop(); }
+            if (fireSource != null) { fireSource.playOnAwake = false; fireSource.loop = false; fireSource.Stop(); }
+            if (destructionSource != null) { destructionSource.playOnAwake = false; destructionSource.loop = false; destructionSource.Stop(); }
+            noiseWait = noiseInterval;
+            SetupMuffle(noiseSource);
+            SetupMuffle(walkSource);
+            SetupMuffle(fireSource);
+            SetupMuffle(destructionSource);
+        }
+
+        // each Audio Source gets a low pass filter (off while the sound is clear) and remembers its normal volume
+        void SetupMuffle(AudioSource s)
+        {
+            if (s == null) return;
+            for (int i = 0; i < muffles.Count; i++)
+                if (muffles[i].src == s) return;                     // same source dragged into two slots, or InitSounds ran twice
+
+            SoundMuffle m = new SoundMuffle();
+            m.src = s;
+            m.baseVolume = s.volume;
+            m.lowPass = s.GetComponent<AudioLowPassFilter>();
+            if (m.lowPass == null) m.lowPass = s.gameObject.AddComponent<AudioLowPassFilter>();
+            m.lowPass.cutoffFrequency = 22000f;
+            m.lowPass.enabled = false;
+            muffles.Add(m);
+        }
+
+        /// <summary>
+        /// Called by the FlatheadEnemy. wallBlocked = a wall is between the robot and the player: all sounds fade to quieter + muffled
+        /// (or back to clear). snap = no fade, jump straight to the final state (used at the moment of death).
+        /// </summary>
+        public void SetSoundsBlocked(bool wallBlocked, float dt, bool snap = false)
+        {
+            if (muffles.Count == 0) return;
+
+            if (snap) muffleBlend = wallBlocked ? 1f : 0f;
+            else muffleBlend = Mathf.MoveTowards(muffleBlend, wallBlocked ? 1f : 0f, dt / Mathf.Max(0.01f, muffleFadeTime));
+            float cutoff = Mathf.Exp(Mathf.Lerp(Mathf.Log(22000f), Mathf.Log(muffledCutoff), muffleBlend));   // fades evenly to the ear
+            float vol = Mathf.Lerp(1f, muffledVolume, muffleBlend);
+            for (int i = 0; i < muffles.Count; i++)
+            {
+                SoundMuffle m = muffles[i];
+                if (m.src == null || m.lowPass == null) continue;
+                m.src.volume = m.baseVolume * vol;
+                m.lowPass.enabled = muffleBlend > 0.001f;
+                m.lowPass.cutoffFrequency = cutoff;
+            }
+        }
+
+        void UpdateSounds()
+        {
+            if (soundsStopped) return;
+
+            // NOISE: always, whatever the robot does. The wait only counts down after the sound has fully played.
+            if (noiseSource != null)
+            {
+                if (noiseSource.isPlaying) noiseWait = noiseInterval;
+                else
+                {
+                    noiseWait -= Time.deltaTime;
+                    if (noiseWait <= 0f)
+                    {
+                        noiseSource.Play();
+                        noiseWait = noiseInterval;
+                    }
+                }
+            }
+
+            // WALKING: only while the legs walk. Not while standing still, not during a jump (crouch, air, landing).
+            if (walkSource != null)
+            {
+                bool walkingNow = walking && !jump && !IsJumping;
+                if (walkingNow && !walkSource.isPlaying) walkSource.Play();
+                else if (!walkingNow && walkSource.isPlaying) walkSource.Stop();
+            }
+        }
+
+        /// <summary>Called by the FlatheadEnemy every time the robot shoots a bolt.</summary>
+        public void PlayFireSound()
+        {
+            if (fireSource != null && fireSource.clip != null) fireSource.PlayOneShot(fireSource.clip);   // one shot per bolt, fast fire doesn't cut the last one off
+        }
+
+        /// <summary>Called by the FlatheadEnemy when the robot dies: noise and walking stop for good, the destruction sound plays once.</summary>
+        public void PlayDeathSounds()
+        {
+            soundsStopped = true;
+            if (noiseSource != null) noiseSource.Stop();
+            if (walkSource != null) walkSource.Stop();
+            if (destructionSource != null) destructionSource.Play();
         }
 
         // for your own scripts / UI buttons

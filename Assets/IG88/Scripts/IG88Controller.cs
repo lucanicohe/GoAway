@@ -19,8 +19,28 @@ public struct IG88Link { public int node; public IG88EdgeKind kind; }
 /// </summary>
 [DisallowMultipleComponent]
 [AddComponentMenu("IG88/IG88 Controller")]
-public class IG88Controller : MonoBehaviour
+public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
 {
+    // CullingGroup LOD & Frustum Culling state
+    Transform EnemyCullingManager.ICullableTarget.Transform => transform;
+    private bool isVisibleToCamera = true;
+    private int distanceBand = 0; // 0 = 0-20m, 1 = 20-50m, 2 = 50-100m, 3 = 100m+
+    private float aiAccumulatedDt = 0f;
+
+    /// <summary>Invoked by EnemyCullingManager when camera visibility or distance band changes.</summary>
+    public void OnCullingStateChanged(bool visible, int band)
+    {
+        bool wasVisible = isVisibleToCamera;
+        isVisibleToCamera = visible;
+        distanceBand = Mathf.Clamp(band, 0, 3);
+
+        // When becoming visible again, immediately update look and pose
+        if (!wasVisible && isVisibleToCamera)
+        {
+            UpdateLook(0f);
+        }
+    }
+
     [Header("Driven automatically (you don't need to touch these)")]
     public bool walking = false;
     public bool aimAtTarget = false;
@@ -226,6 +246,7 @@ public class IG88Controller : MonoBehaviour
         muffleBlend = 0f;
         wallCheckTimer = 0f;
         move = new EnemyMoveSystem(this, gm, patrolRoute, startNode);   // puts the droid on its start waypoint
+        if (chaseLight != null) chaseLight.shadows = LightShadows.None;   // a point light with shadows = 6 shadow maps each (the shadow atlas warning)
         SetupGlow();
         UpdateLook(0f);
         ready = true;
@@ -636,8 +657,22 @@ public class IG88Controller : MonoBehaviour
         if (!ready || gm == null || move == null) return;
         float dt = Time.deltaTime;
 
-        // detection + waypoint movement. Returns true when the droid really moved this frame -> drives the walk animation.
-        walking = move.Tick(dt);
+        // CullingGroup Distance LOD:
+        // Band 0 (0-20m):   full frame rate
+        // Band 1 (20-50m):  ~10 Hz (interval 0.1s)
+        // Band 2 (50-100m): ~2 Hz (interval 0.5s)
+        // Band 3 (100m+):   ~1 Hz (interval 1.0s)
+        float interval = distanceBand == 0 ? 0f : (distanceBand == 1 ? 0.1f : (distanceBand == 2 ? 0.5f : 1.0f));
+        aiAccumulatedDt += dt;
+        // a chasing droid is never slowed down by distance: sight, aiming and shooting need every frame
+        bool shouldTickAI = interval <= 0f || aiAccumulatedDt >= interval || move.Chasing;
+
+        if (shouldTickAI)
+        {
+            // Detection + waypoint movement using accumulated dt so speed and distance are exact
+            walking = move.Tick(aiAccumulatedDt);
+            aiAccumulatedDt = 0f;
+        }
 
         // hard stop any playing footstep the moment the droid stops moving
         if (!walking && footstepSound != null && footstepSound.isPlaying)
@@ -657,17 +692,30 @@ public class IG88Controller : MonoBehaviour
                 PlaySound(detectSound, DroidSound.Detect, false);
             }
         }
-        UpdatePatrolSound(chasing);
-        UpdateSoundMuffle(dt);
+
+        // Nonessential audio muffle raycasts suspended when far away (>50m)
+        if (chasing || distanceBand < 2)
+        {
+            UpdatePatrolSound(chasing);
+            UpdateSoundMuffle(dt);
+        }
 
         Transform p = gm.Player;
         if (chasing && p != null) target = p;        // target = object tagged Player, found automatically
         if (p != null) aimPoint = gm.PlayerAimPoint;
 
-        if (!gm.DroidPatrolOff) UpdateFiring();      // Droid Patrol Off = stand still, do nothing
+        // Shooting does NOT depend on the CullingGroup (UpdateFiring only does something while the droid chases and sees the player).
+        // A wrong / late distance band used to switch the shooting, and with it the fire sound, off for good.
+        if (!gm.DroidPatrolOff) UpdateFiring();
 
         stepsPerSecond = gm.WalkSteps;
-        UpdateLook(dt);
+
+        // Visual effects (glow material emission + point light):
+        // Only update when visible to camera or close!
+        if (isVisibleToCamera || distanceBand == 0)
+        {
+            UpdateLook(dt);
+        }
     }
 
     // ------------------------------------------------------------------ shooting (same idea as the player's blaster, red)
@@ -872,6 +920,10 @@ public class IG88Controller : MonoBehaviour
 
     void LateUpdate()
     {
+        // When offscreen and not right next to the player, skip expensive procedural skeletal bone manipulation
+        // (not while chasing: the gun has to keep aiming at the player or UpdateFiring never sees it pointing at him)
+        if (!isVisibleToCamera && distanceBand > 0 && !aimAtTarget) return;
+
         if (!rigReady && !DetectRig()) return;
         float dt = Time.deltaTime;
 

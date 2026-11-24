@@ -16327,23 +16327,23 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 413118853588250899, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_LocalRotation.w
-      value: 0.9980158
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 413118853588250899, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_LocalRotation.z
-      value: 0.06296473
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 413118853588250899, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_AnchoredPosition.x
-      value: -301
+      value: -94.7
       objectReference: {fileID: 0}
     - target: {fileID: 413118853588250899, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_AnchoredPosition.y
-      value: 173.5
+      value: 99
       objectReference: {fileID: 0}
     - target: {fileID: 413118853588250899, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
-      value: 7.22
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1566626863083222828, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_Color.a
@@ -16479,23 +16479,23 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 4017353016572501060, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_LocalRotation.w
-      value: 0.9976245
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4017353016572501060, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_LocalRotation.z
-      value: -0.06888596
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 4017353016572501060, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_AnchoredPosition.x
-      value: 308.5
+      value: 55.6
       objectReference: {fileID: 0}
     - target: {fileID: 4017353016572501060, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_AnchoredPosition.y
-      value: 171.6
+      value: 99
       objectReference: {fileID: 0}
     - target: {fileID: 4017353016572501060, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
-      value: -7.9
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 4128263799289446896, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: m_IsActive
@@ -16903,7 +16903,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 9063521800830333542, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: ammoEmptyAngle
-      value: -22
+      value: -19
       objectReference: {fileID: 0}
     - target: {fileID: 9063521800830333542, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       propertyPath: ammoNumberText
@@ -23372,7 +23372,7 @@ AudioSource:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 996687843}
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 4
   OutputAudioMixerGroup: {fileID: 0}
   m_audioClip: {fileID: 0}
@@ -23642,16 +23642,16 @@ RectTransform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1011629654}
-  m_LocalRotation: {x: 0, y: 0, z: 0.05434022, w: 0.99852246}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 91393535}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 6.23}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0}
   m_AnchorMax: {x: 0.5, y: 0}
-  m_AnchoredPosition: {x: -222.77, y: 181.9}
+  m_AnchoredPosition: {x: -25.2, y: 90.5}
   m_SizeDelta: {x: 240, y: 32}
   m_Pivot: {x: 0.5, y: 1}
 --- !u!114 &1011629656
@@ -29261,7 +29261,7 @@ AudioSource:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1155265176}
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 4
   OutputAudioMixerGroup: {fileID: 0}
   m_audioClip: {fileID: 0}
@@ -29873,16 +29873,16 @@ RectTransform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1307372838}
-  m_LocalRotation: {x: 0, y: 0, z: -0.06453231, w: 0.9979156}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 587834249}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: -7.4}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0}
   m_AnchorMax: {x: 0.5, y: 0}
-  m_AnchoredPosition: {x: 228.6, y: 182.4}
+  m_AnchoredPosition: {x: -17.5, y: 91.5}
   m_SizeDelta: {x: 240, y: 32}
   m_Pivot: {x: 0.5, y: 1}
 --- !u!114 &1307372840
@@ -40907,6 +40907,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: adfd43463d65243a8830900667f9f29b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameManager
+  cullingManager: {fileID: 0}
   maxAmmo: 120
   currentAmmo: 120
   infiniteAmmo: 0
@@ -40935,7 +40936,7 @@ MonoBehaviour:
   detectionRadius: 16
   sightRange: 40
   loseSightTime: 10
-  droidDamage: 6
+  droidDamage: 3
   droidFireRate: 1.5
   droidAccuracy: 0.85
   droidBoltSpeed: 40
@@ -40963,15 +40964,29 @@ MonoBehaviour:
   r5: {fileID: 68513790}
   drawWaypointGizmos: 1
   flatheadPrefab: {fileID: 1381394780585354254, guid: 9b4241df7d31441d58c710e63f777346, type: 3}
-  flatheadCount: 4
+  flatheadCount: 6
   flatheadHealth: 1
   flatheadTurretHitRadius: 0.25
+  flatheadDamage: 1
+  flatheadFireRate: 25
+  flatheadBoltColor: {r: 0.8113208, g: 0.2028302, b: 0.2028302, a: 1}
+  flatheadBoltLightIntensity: 0.3
+  flatheadBoltLightRange: 3
   flatheadStepsPerSecond: 1.4
   flatheadStrideLength: 0.3
-  flatheadJumpSpeed: 1
+  flatheadJumpSpeed: 0.5
   flatheadJumpArc: 0.5
   flatheadPatrolZoneSize: 4
-  minFlatheadDistance: 1.5
+  minFlatheadDistance: 3
+  flatheadSenseRadius: 15
+  flatheadSneakSpeed: 0.7
+  flatheadFleeSpeed: 2.5
+  flatheadStrikeDistance: 6
+  flatheadShotsPerStrike: 99
+  flatheadGazeAngle: 15
+  flatheadGazeTime: 0.3
+  flatheadRetreatTime: 12
+  flatheadReplaceDelay: 2
   flatheadPictureUp: {x: 0, y: 0, z: 1}
   flatheadSurfaceOffset: 0
   w1: {fileID: 2052142267}
