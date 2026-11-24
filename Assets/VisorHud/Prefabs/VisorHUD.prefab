@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 5660056831686108850}
   - component: {fileID: 6826311831547560123}
   - component: {fileID: 3399011217009564688}
+  - component: {fileID: 2647254820629149752}
   m_Layer: 0
   m_Name: Fill
   m_TagString: Untagged
@@ -66,15 +67,27 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: 93b2376b8116b6b88d7098e029904d3b, type: 3}
-  m_Type: 3
+  m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 1
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
   m_FillOrigin: 0
   m_UseSpriteMesh: 0
   m_PixelsPerUnitMultiplier: 1
+--- !u!114 &2647254820629149752
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 534964209398445480}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bff12c10667754a009ee01f37e311d24, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VisorHudBarWipe
 --- !u!1 &969569937214035950
 GameObject:
   m_ObjectHideFlags: 0
@@ -611,6 +624,7 @@ GameObject:
   - component: {fileID: 1257151916236698019}
   - component: {fileID: 2072834708944422306}
   - component: {fileID: 8908918245095555919}
+  - component: {fileID: 6612106533124425724}
   m_Layer: 0
   m_Name: Fill
   m_TagString: Untagged
@@ -666,15 +680,27 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: 21300000, guid: 3f2c235a75491c95fd7362126f94302f, type: 3}
-  m_Type: 3
+  m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
-  m_FillMethod: 1
+  m_FillMethod: 0
   m_FillAmount: 1
   m_FillClockwise: 1
-  m_FillOrigin: 0
+  m_FillOrigin: 1
   m_UseSpriteMesh: 0
   m_PixelsPerUnitMultiplier: 1
+--- !u!114 &6612106533124425724
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3250575692977827256}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bff12c10667754a009ee01f37e311d24, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VisorHudBarWipe
 --- !u!1 &3743530494478791139
 GameObject:
   m_ObjectHideFlags: 0
@@ -880,7 +906,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 649.36725, y: 0}
+  m_AnchoredPosition: {x: 647.9229, y: 0}
   m_SizeDelta: {x: 64, y: 32}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &3882927395453674921
@@ -904,7 +930,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 0.0025033134}
+  m_Color: {r: 1, g: 1, b: 1, a: 0.008217075}
   m_RaycastTarget: 0
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -1142,6 +1168,8 @@ MonoBehaviour:
   ammoBarOpacity: 1
   emptyBarOpacity: 0.35
   smoothTime: 0.12
+  healthEmptyAngle: 147
+  ammoEmptyAngle: 33
   showTopVisor: 1
   showCompass: 1
   showSideArcs: 1
@@ -1196,6 +1224,12 @@ MonoBehaviour:
   healthLabelOpacity: 1
   ammoLabelOpacity: 1
   labelSize: 22
+  healthNumberText: {fileID: 0}
+  ammoNumberText: {fileID: 0}
+  numberColor: {r: 0.84, g: 0.93, b: 0.96, a: 1}
+  healthNumberOpacity: 1
+  ammoNumberOpacity: 1
+  numberSize: 28
   healthFill: {fileID: 3399011217009564688}
   healthBack: {fileID: 7616272222025956211}
   ammoFill: {fileID: 8908918245095555919}
@@ -1222,6 +1256,8 @@ MonoBehaviour:
   leftPanelEdgeImage: {fileID: 2092192728828065418}
   rightPanelBodyImage: {fileID: 3077485882348023035}
   rightPanelEdgeImage: {fileID: 6873453118756868875}
+  healthWipe: {fileID: 2647254820629149752}
+  ammoWipe: {fileID: 6612106533124425724}
   compassArea: {fileID: 5898887524407381042}
   compassTexts:
   - {fileID: 1566626863083222828}
@@ -1623,7 +1659,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -649.5109, y: 0}
+  m_AnchoredPosition: {x: -648.518, y: 0}
   m_SizeDelta: {x: 64, y: 32}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &7290242041092722391
@@ -1647,7 +1683,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 0.0019348144}
+  m_Color: {r: 1, g: 1, b: 1, a: 0.0058628623}
   m_RaycastTarget: 0
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1

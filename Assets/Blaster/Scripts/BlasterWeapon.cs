@@ -332,6 +332,8 @@ public class BlasterWeapon : MonoBehaviour
 
         if (logHits)
         {
+            // PERF: Disable "Log Hits" in the Inspector for release builds to eliminate
+            // per-shot string allocations (GetPath + concatenation).
             Debug.Log("[Blaster] HIT \"" + GetPath(hit.collider.transform) + "\"" +
                       "  tag: " + hit.collider.tag +
                       "  dist: " + info.distance.ToString("F1") + " m" +

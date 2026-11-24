@@ -65,9 +65,11 @@ internal sealed class EnemyMoveSystem
     static readonly int[] GreenNodes = { G1, G2, G3, G4, G5, G6 };
     static readonly int[] RedNodes = { R1, R2, R3, R4, R5, G3 };
 
-    // Waypoints where droids may NOT spawn or patrol (chase-only). Empty now: droids spawn and patrol on
-    // G1 and R1 like on every other waypoint. To block a waypoint again, list it here, for example { G1, R1 }.
-    static readonly int[] NoPatrolNodes = { };
+    // Waypoints where droids may NOT spawn or patrol (chase-only): G3, G4 and R3, the waypoints of the middle rooms.
+    // Every connection into the middle touches one of them (G2-G3, G3-R4, G3-G4, G4-G5, G3-R3, R3-R2), so blocking these three
+    // keeps patrolling droids on the outer ring: G1, G2, G5, G6, R5, R4, R2, R1. Droids still walk to and through them when they
+    // CHASE the player (chase and return-to-patrol use all connections). To block another waypoint, add it to the list.
+    static readonly int[] NoPatrolNodes = { G3, G4, R3 };
 
     static Transform[] nodes;
     static List<IG88Link>[] links;
@@ -170,8 +172,12 @@ internal sealed class EnemyMoveSystem
 
     public static IG88EdgeKind EdgeKindOf(int a, int b)
     {
-        foreach (Edge e in Edges)
+        // Use index-based loop to avoid heap-allocating an enumerator over a struct array.
+        for (int i = 0; i < Edges.Length; i++)
+        {
+            Edge e = Edges[i];
             if ((e.a == a && e.b == b) || (e.a == b && e.b == a)) return e.kind;
+        }
         return IG88EdgeKind.Yellow;
     }
 
@@ -215,24 +221,27 @@ internal sealed class EnemyMoveSystem
         return a >= 0;
     }
 
+    // Reusable queue avoids allocating a new one per droid spawn.
+    static readonly Queue<int> hopQueue = new Queue<int>();
+
     /// <summary>Number of connections from 'start' to every waypoint, walking only along the patrol network of one route (its own colour + the yellow connections).</summary>
     public static int[] RouteHops(IG88Route r, int start)
     {
         int[] hops = new int[nodes.Length];
         for (int i = 0; i < hops.Length; i++) hops[i] = 999;
-        Queue<int> q = new Queue<int>();
+        hopQueue.Clear();
         hops[start] = 0;
-        q.Enqueue(start);
-        while (q.Count > 0)
+        hopQueue.Enqueue(start);
+        while (hopQueue.Count > 0)
         {
-            int n = q.Dequeue();
+            int n = hopQueue.Dequeue();
             List<IG88Link> ls = links[n];
             for (int i = 0; i < ls.Count; i++)
             {
                 bool ok = PatrolEdgeMatches(r, ls[i].kind);
                 if (!ok || hops[ls[i].node] != 999) continue;
                 hops[ls[i].node] = hops[n] + 1;
-                q.Enqueue(ls[i].node);
+                hopQueue.Enqueue(ls[i].node);
             }
         }
         return hops;

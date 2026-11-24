@@ -1,16 +1,6 @@
 using UnityEngine;
 
+/// <summary>Placeholder AudioManager — extend as needed. Empty Update() removed to save per-frame overhead.</summary>
 public class AudioManager : MonoBehaviour
 {
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
-    {
-        
-    }
-
-    // Update is called once per frame
-    void Update()
-    {
-        
-    }
 }

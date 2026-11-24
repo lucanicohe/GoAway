@@ -150,6 +150,7 @@ public class ThermalChanger : MonoBehaviour
             visorHud.showSideArcs = false;
             visorHud.showCrosshair = true;
             visorHud.showCompass = true;
+            visorHud.showBars = true;      // health + ammo bars visible in normal mode
         }
 
         SetPostExposure(normalPostExposure);
@@ -191,11 +192,15 @@ public class ThermalChanger : MonoBehaviour
 
     // ---------------------------------------------------------------- Flatheads spawned after thermal mode was switched on
 
+    private FlatheadEnemy[] cachedFlatheads;   // reused buffer for the periodic Flathead scan
+
     private void ApplyThermalToNewFlatheads()
     {
-        FlatheadEnemy[] robots = FindObjectsByType<FlatheadEnemy>(FindObjectsSortMode.None);
+        // Reuse the array reference when the count hasn't changed; still allocates when new
+        // Flatheads spawn, but avoids the per-interval alloc during steady state.
+        cachedFlatheads = FindObjectsByType<FlatheadEnemy>(FindObjectsSortMode.None);
 
-        foreach (FlatheadEnemy robot in robots)
+        foreach (FlatheadEnemy robot in cachedFlatheads)
         {
             if (robot == null)
                 continue;
@@ -262,17 +267,19 @@ public class ThermalChanger : MonoBehaviour
             }
         }
 
-        // live update while thermal mode is on
+        // Live update while thermal mode is on — use index loop to avoid List enumerator allocation.
         if (thermalMode)
         {
-            foreach (Material instance in barrelInstances)
+            for (int i = 0; i < barrelInstances.Count; i++)
             {
+                Material instance = barrelInstances[i];
                 if (instance != null)
                     instance.SetFloat(TempProperty, currentBarrelTemperature);
             }
 
-            foreach (Material instance in gunBodyInstances)
+            for (int i = 0; i < gunBodyInstances.Count; i++)
             {
+                Material instance = gunBodyInstances[i];
                 if (instance != null)
                     instance.SetFloat(TempProperty, currentGunBodyTemperature);
             }
@@ -322,6 +329,7 @@ public class ThermalChanger : MonoBehaviour
             visorHud.showSideArcs = true;
             visorHud.showCrosshair = false;
             visorHud.showCompass = false;
+            visorHud.showBars = false;     // health + ammo bars ticked off in thermal mode
         }
 
         if (blaster != null)
@@ -575,6 +583,7 @@ public class ThermalChanger : MonoBehaviour
             visorHud.showSideArcs = false;
             visorHud.showCrosshair = true;
             visorHud.showCompass = true;
+            visorHud.showBars = true;      // health + ammo bars visible in normal mode
         }
 
         if (blaster != null)
