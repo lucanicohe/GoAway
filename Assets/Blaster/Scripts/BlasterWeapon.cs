@@ -37,6 +37,16 @@ public class BlasterWeapon : MonoBehaviour
     [SerializeField] private AudioClip blasterSound;
     [SerializeField, Range(0f, 1f)] private float shotVolume = 1f;
 
+    [Header("Bolt Audio")]
+    [Tooltip("A short seamless loop played in 3D from each flying bolt. Leave empty to mute bolt flight.")]
+    [SerializeField] private AudioClip boltFlightLoop;
+    [Tooltip("Played in 3D at the hit point, for hits on any collider.")]
+    [SerializeField] private AudioClip boltImpactSound;
+    [SerializeField, Range(0f, 1f)] private float boltFlightVolume = 0.45f;
+    [SerializeField, Range(0f, 1f)] private float boltImpactVolume = 0.8f;
+    [SerializeField, Min(0.1f)] private float boltAudioMinDistance = 1f;
+    [SerializeField, Min(1f)] private float boltAudioMaxDistance = 35f;
+
     [Header("Firing")]
     [SerializeField] private bool automatic = true;
     [Tooltip("Shots per second.")]
@@ -437,6 +447,7 @@ public class BlasterWeapon : MonoBehaviour
                     sparkWidth, sparkLength, impactFlashSize,
                     sparkSpeedMin, sparkSpeedMax, sparkLifeMin, sparkLifeMax, sparkGravity,
                     impactLight, boltLightColor, impactLightIntensity, impactLightRange);
+            s.ConfigureImpactAudio(boltImpactSound, boltImpactVolume, boltAudioMinDistance, boltAudioMaxDistance);
             bursts.Add(s);
         }
     }
@@ -446,7 +457,8 @@ public class BlasterWeapon : MonoBehaviour
         GameObject root = new GameObject("Bolt " + index);
         root.transform.SetParent(boltRoot, false);
         BlasterBolt bolt = root.AddComponent<BlasterBolt>();
-        bolt.Setup(this, boltLength, boltCastRadius);
+        bolt.Setup(this, boltLength, boltCastRadius, boltFlightLoop, boltFlightVolume,
+                   boltAudioMinDistance, boltAudioMaxDistance);
 
         MakeCapsule("Core", root.transform, boltRadius, boltLength, boltCoreMaterial, false);
         MakeCapsule("Glow", root.transform, boltRadius * 2.2f, boltLength * 1.15f, boltGlowMaterial, true);

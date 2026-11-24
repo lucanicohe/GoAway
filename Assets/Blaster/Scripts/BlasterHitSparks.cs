@@ -14,6 +14,10 @@ public class BlasterHitSparks : MonoBehaviour
 
     private Transform flash;
     private Light hitLight;
+    private Transform impactAudioTransform;
+    private AudioSource impactAudio;
+    private AudioClip impactSound;
+    private float impactVolume = 1f;
 
     private float gravity;
     private float width;
@@ -84,6 +88,32 @@ public class BlasterHitSparks : MonoBehaviour
         gameObject.SetActive(false);
     }
 
+    /// <summary>Sets up the pooled 3D AudioSource used for impact sounds.</summary>
+    public void ConfigureImpactAudio(AudioClip clip, float volume, float minDistance, float maxDistance)
+    {
+        impactSound = clip;
+        impactVolume = volume;
+        if (clip == null)
+            return;
+
+        if (impactAudio == null)
+        {
+            GameObject audioObject = new GameObject("Impact Audio");
+            audioObject.transform.SetParent(transform, false);
+            impactAudioTransform = audioObject.transform;
+            impactAudio = audioObject.AddComponent<AudioSource>();
+        }
+
+        impactAudio.playOnAwake = false;
+        impactAudio.loop = false;
+        impactAudio.spatialBlend = 1f;
+        impactAudio.dopplerLevel = 0f;
+        impactAudio.rolloffMode = AudioRolloffMode.Logarithmic;
+        impactAudio.minDistance = minDistance;
+        impactAudio.maxDistance = Mathf.Max(minDistance, maxDistance);
+        impactAudio.volume = 1f;
+    }
+
     private static void RemoveCollider(GameObject go)
     {
         Collider c = go.GetComponent<Collider>();
@@ -103,6 +133,13 @@ public class BlasterHitSparks : MonoBehaviour
     {
         gameObject.SetActive(true);
         transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+
+        if (impactAudio != null && impactSound != null)
+        {
+            impactAudioTransform.position = point;
+            impactAudio.Stop();
+            impactAudio.PlayOneShot(impactSound, impactVolume);
+        }
 
         for (int i = 0; i < sparks.Length; i++)
         {
@@ -137,7 +174,7 @@ public class BlasterHitSparks : MonoBehaviour
     private void Update()
     {
         float dt = Time.deltaTime;
-        bool anyAlive = false;
+        bool anyAlive = impactAudio != null && impactAudio.isPlaying;
 
         for (int i = 0; i < sparks.Length; i++)
         {

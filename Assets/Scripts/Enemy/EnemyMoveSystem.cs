@@ -2,24 +2,20 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Waypoint movement for the IG-88 droids. NO NavMesh and no NavMeshAgent: a droid only ever walks along the drawn
-/// waypoint connections (green, red and yellow).
+/// Waypoint movement for the IG-88 droids. NO NavMesh and no NavMeshAgent: patrol droids walk their assigned two-point segment;
+/// stationary guards stay on their NEW1-NEW8 post.
 ///
 /// This file holds two things:
 ///
-///  1) ALL WAYPOINTS (static, one graph shared by every droid): the 11 waypoints G1-G6 / R1-R5, every connection between them
-///     (green / red / yellow), the patrol routes, the shortest paths between all waypoints, "closest point on the track to a position",
-///     and which waypoints droids may not patrol. The GameManager only hands in the 11 waypoint objects (you still drag them into the
-///     GameManager like before) via SetWaypoints().
+///  1) ALL WAYPOINTS (static, one graph shared by every droid): G1-G6 / R1-R5 and NEW1-NEW8, the six patrol segments, shortest paths,
+///     and the closest point on a patrol track. The GameManager hands in all 19 waypoint objects via SetWaypoints().
 ///
 ///  2) THE MOVEMENT + DECISIONS OF ONE DROID (one instance per droid, created by the IG88Controller). Every frame IG88Controller calls Tick():
-///      - PATROL: random walk over the connections of the droid's own route colour AND the yellow ones, inside its patrol zone.
-///      - DETECTION: the FIRST detection is by SIGHT only (clear line of sight up to the Sight Range). The Detection Radius is only used
-///        after the droid has seen the player once, and only for 'Lose Sight Time' seconds after it LAST SAW him. After that it forgets him
-///        and has to SEE him again.
-///      - CHASE: walks along the track (all connections) to the closest point of the track to the player and stops there. With a clear shot
-///        it stops and fires; it only walks again when the player moves. It never gets closer than 1 m to the player.
-///      - GIVE UP: not SEEN for 'Lose Sight Time' seconds -> back to the patrol network.
+///      - PATROL: walks back and forth along its assigned pair of waypoints.
+///      - GUARD: waits at NEW1-NEW8 without patrolling, senses through walls inside the guard radius, then chases on the network and returns to its post.
+///      - DETECTION: patrol droids first detect by sight; guards also detect within their short guard radius.
+///      - CHASE: every droid can move anywhere along the connected track to the closest track point; guards return to their post after giving up.
+///      - GIVE UP: not detected for 'Lose Sight Time' seconds -> patrol droids return to their assigned segment; guards stay at their post.
 ///      - Never touches another droid: it waits until the other droid moves away.
 ///    The droid body (animation, shooting, health, glow) stays in the IG88Controller; this class only decides WHERE the droid walks.
 /// </summary>
@@ -30,59 +26,75 @@ internal sealed class EnemyMoveSystem
     // =====================================================================
 
     public const int G1 = 0, G2 = 1, G3 = 2, G4 = 3, G5 = 4, G6 = 5, R1 = 6, R2 = 7, R3 = 8, R4 = 9, R5 = 10;
-    public static readonly string[] NodeNames = { "G1", "G2", "G3", "G4", "G5", "G6", "R1", "R2", "R3", "R4", "R5" };
+    public const int NEW1 = 11, NEW2 = 12, NEW3 = 13, NEW4 = 14, NEW5 = 15, NEW6 = 16, NEW7 = 17, NEW8 = 18;
+    public static readonly string[] NodeNames = { "G1", "G2", "G3", "G4", "G5", "G6", "R1", "R2", "R3", "R4", "R5", "NEW1", "NEW2", "NEW3", "NEW4", "NEW5", "NEW6", "NEW7", "NEW8" };
 
     public struct Edge
     {
         public int a, b;
+        public IG88PatrolRoute route;
         public IG88EdgeKind kind;
-        public Edge(int a, int b, IG88EdgeKind kind) { this.a = a; this.b = b; this.kind = kind; }
+        public Edge(int a, int b, IG88PatrolRoute route, IG88EdgeKind kind) { this.a = a; this.b = b; this.route = route; this.kind = kind; }
     }
 
-    // all connections (copied from dots.jpg)
+    // The first six are the only patrol routes. Extra links retain the full chase/return track but are chase-only.
     public static readonly Edge[] Edges =
     {
-        // green (patrol 1)
-        new Edge(G6, G5, IG88EdgeKind.Green),
-        new Edge(G5, G4, IG88EdgeKind.Green),
-        new Edge(G4, G3, IG88EdgeKind.Green),
-        new Edge(G3, G2, IG88EdgeKind.Green),
-        new Edge(G5, G2, IG88EdgeKind.Green),
-        new Edge(G2, G1, IG88EdgeKind.Green),
-        // red (patrol 2) - G3 is the shared point
-        new Edge(R5, R4, IG88EdgeKind.Red),
-        new Edge(R4, R2, IG88EdgeKind.Red),
-        new Edge(R2, R1, IG88EdgeKind.Red),
-        new Edge(R2, R3, IG88EdgeKind.Red),
-        new Edge(R3, G3, IG88EdgeKind.Red),
-        new Edge(G3, R4, IG88EdgeKind.Red),
-        // yellow (patrolled by BOTH routes, and used for chasing)
-        new Edge(R5, G6, IG88EdgeKind.Yellow),
-        new Edge(R1, G1, IG88EdgeKind.Yellow),
+        new Edge(G6, G5, IG88PatrolRoute.G6ToG5, IG88EdgeKind.Green),
+        new Edge(G5, G2, IG88PatrolRoute.G5ToG2, IG88EdgeKind.Green),
+        new Edge(G2, G1, IG88PatrolRoute.G2ToG1, IG88EdgeKind.Green),
+        new Edge(R5, R4, IG88PatrolRoute.R5ToR4, IG88EdgeKind.Red),
+        new Edge(R4, R2, IG88PatrolRoute.R4ToR2, IG88EdgeKind.Red),
+        new Edge(R2, R1, IG88PatrolRoute.R2ToR1, IG88EdgeKind.Red),
+        new Edge(G5, G4, IG88PatrolRoute.None, IG88EdgeKind.Green),
+        new Edge(G4, G3, IG88PatrolRoute.None, IG88EdgeKind.Green),
+        new Edge(G3, G2, IG88PatrolRoute.None, IG88EdgeKind.Green),
+        new Edge(R2, R3, IG88PatrolRoute.None, IG88EdgeKind.Red),
+        new Edge(R3, G3, IG88PatrolRoute.None, IG88EdgeKind.Red),
+        new Edge(G3, R4, IG88PatrolRoute.None, IG88EdgeKind.Red),
+        new Edge(R5, G6, IG88PatrolRoute.None, IG88EdgeKind.Yellow),
+        new Edge(R1, G1, IG88PatrolRoute.None, IG88EdgeKind.Yellow),
     };
 
-    // where droids spawn (the waypoints of each route)
-    static readonly int[] GreenNodes = { G1, G2, G3, G4, G5, G6 };
-    static readonly int[] RedNodes = { R1, R2, R3, R4, R5, G3 };
+    public static readonly IG88PatrolRoute[] PatrolRoutes =
+    {
+        IG88PatrolRoute.G6ToG5, IG88PatrolRoute.G5ToG2, IG88PatrolRoute.G2ToG1,
+        IG88PatrolRoute.R5ToR4, IG88PatrolRoute.R4ToR2, IG88PatrolRoute.R2ToR1
+    };
 
-    // Waypoints where droids may NOT spawn or patrol (chase-only): G3, G4 and R3, the waypoints of the middle rooms.
-    // Every connection into the middle touches one of them (G2-G3, G3-R4, G3-G4, G4-G5, G3-R3, R3-R2), so blocking these three
-    // keeps patrolling droids on the outer ring: G1, G2, G5, G6, R5, R4, R2, R1. Droids still walk to and through them when they
-    // CHASE the player (chase and return-to-patrol use all connections). To block another waypoint, add it to the list.
+    // The scene image shows where every stationary post sits on the old movement network.
+    // N1=R4-G3, N2=G3-G2, N3=G4-G5, N4=R2-R3, N5/N6=R1-G1, N7/N8=R5-G6.
+    static readonly int[,] PostTrackEndpoints =
+    {
+        { R4, G3 }, { G3, G2 }, { G4, G5 }, { R2, R3 },
+        { R1, G1 }, { R1, G1 }, { R5, G6 }, { R5, G6 }
+    };
+    static readonly bool[] postPlacementWarningLogged = new bool[8];
+
+    // Former middle-room positions remain in the scene graph but are not part of the new patrol network.
     static readonly int[] NoPatrolNodes = { G3, G4, R3 };
 
     static Transform[] nodes;
+    static List<Edge> graphEdges;
     static List<IG88Link>[] links;
     static float[,] dist;
     static int[,] next;
     static bool graphReady;
 
-    /// <summary>True when all 11 waypoints are assigned and the graph is built.</summary>
+    /// <summary>True when all 19 waypoints are assigned and the graph is built.</summary>
     public static bool Ready { get { return graphReady; } }
     public static int NodeCount { get { return graphReady ? nodes.Length : 0; } }
+    public static IEnumerable<Edge> Connections
+    {
+        get
+        {
+            if (graphEdges != null) return graphEdges;
+            return Edges;
+        }
+    }
 
     /// <summary>
-    /// Hands in the 11 waypoint objects in this order: G1, G2, G3, G4, G5, G6, R1, R2, R3, R4, R5.
+    /// Hands in all waypoint objects in this order: G1-G6, R1-R5, NEW1-NEW8.
     /// Returns false when one is missing ('missing' then lists the names). Builds the connections and the shortest paths.
     /// </summary>
     public static bool SetWaypoints(Transform[] waypoints, List<string> missing)
@@ -95,24 +107,27 @@ internal sealed class EnemyMoveSystem
         if (!graphReady) return false;
 
         nodes = waypoints;
-        links = new List<IG88Link>[nodes.Length];
-        for (int i = 0; i < links.Length; i++) links[i] = new List<IG88Link>();
-        foreach (Edge e in Edges)
-        {
-            links[e.a].Add(new IG88Link { node = e.b, kind = e.kind });
-            links[e.b].Add(new IG88Link { node = e.a, kind = e.kind });
-        }
-
+        for (int i = 0; i < postPlacementWarningLogged.Length; i++) postPlacementWarningLogged[i] = false;
         dist = new float[nodes.Length, nodes.Length];
         next = new int[nodes.Length, nodes.Length];
         RebuildDistances();
         return true;
     }
 
-    // Floyd-Warshall over ALL connections (green + red + yellow) - used for chasing / returning to patrol
+    // Rebuild the chase graph (including the explicit NEW post segments), then its shortest paths.
     public static void RebuildDistances()
     {
         if (!graphReady) return;
+        RebuildGraphEdges();
+        links = new List<IG88Link>[nodes.Length];
+        for (int i = 0; i < links.Length; i++) links[i] = new List<IG88Link>();
+        for (int i = 0; i < graphEdges.Count; i++)
+        {
+            Edge e = graphEdges[i];
+            links[e.a].Add(new IG88Link { node = e.b, route = e.route, kind = e.kind });
+            links[e.b].Add(new IG88Link { node = e.a, route = e.route, kind = e.kind });
+        }
+
         int n = nodes.Length;
         const float INF = 1e9f;
         for (int i = 0; i < n; i++)
@@ -122,8 +137,9 @@ internal sealed class EnemyMoveSystem
                 next[i, j] = i == j ? i : -1;
             }
 
-        foreach (Edge e in Edges)
+        for (int i = 0; i < graphEdges.Count; i++)
         {
+            Edge e = graphEdges[i];
             float w = Vector3.Distance(nodes[e.a].position, nodes[e.b].position);
             dist[e.a, e.b] = dist[e.b, e.a] = w;
             next[e.a, e.b] = e.b;
@@ -140,11 +156,102 @@ internal sealed class EnemyMoveSystem
                     }
     }
 
+    static void RebuildGraphEdges()
+    {
+        graphEdges = new List<Edge>(Edges.Length + 16);
+        graphEdges.AddRange(Edges);
+
+        // Split each affected track segment into consecutive links through its posts. The post-to-post links stay on the
+        // established corridor rather than cutting directly between endpoints; they are chase-only, not patrol routes.
+        int[] splitNodes = new int[10];
+        float[] splitT = new float[10];
+        for (int edgeIndex = 0; edgeIndex < Edges.Length; edgeIndex++)
+        {
+            Edge edge = Edges[edgeIndex];
+            Vector3 a = nodes[edge.a].position;
+            Vector3 ab = nodes[edge.b].position - a;
+            float lengthSquared = ab.sqrMagnitude;
+            int splitCount = 1;
+            splitNodes[0] = edge.a;
+            splitT[0] = 0f;
+
+            for (int postIndex = 0; postIndex < 8; postIndex++)
+            {
+                int endpointA = PostTrackEndpoints[postIndex, 0];
+                int endpointB = PostTrackEndpoints[postIndex, 1];
+                bool belongsToEdge = (edge.a == endpointA && edge.b == endpointB) ||
+                                     (edge.a == endpointB && edge.b == endpointA);
+                if (!belongsToEdge) continue;
+
+                int post = NEW1 + postIndex;
+                float rawT = lengthSquared > 1e-8f
+                    ? Vector3.Dot(nodes[post].position - a, ab) / lengthSquared
+                    : 0f;
+                float t = Mathf.Clamp01(rawT);
+                float offSegment = Vector3.Distance(nodes[post].position, a + ab * t);
+                if ((offSegment > 0.5f || rawT < 0f || rawT > 1f) && !postPlacementWarningLogged[postIndex])
+                {
+                    Debug.LogWarning("IG-88 post " + NodeNames[post] + " is not on its assigned network segment " +
+                                     NodeNames[endpointA] + "-" + NodeNames[endpointB] +
+                                     ". Move it onto that line so chase and return movement stays on the network.", nodes[post]);
+                    postPlacementWarningLogged[postIndex] = true;
+                }
+                splitNodes[splitCount] = post;
+                splitT[splitCount] = t;
+                splitCount++;
+            }
+
+            if (splitCount == 1) continue;
+            splitNodes[splitCount] = edge.b;
+            splitT[splitCount] = 1f;
+            splitCount++;
+
+            // At most two posts share a segment in this layout; insertion sort keeps their order along that segment.
+            for (int i = 1; i < splitCount; i++)
+            {
+                int node = splitNodes[i];
+                float t = splitT[i];
+                int j = i - 1;
+                while (j >= 0 && splitT[j] > t)
+                {
+                    splitNodes[j + 1] = splitNodes[j];
+                    splitT[j + 1] = splitT[j];
+                    j--;
+                }
+                splitNodes[j + 1] = node;
+                splitT[j + 1] = t;
+            }
+
+            for (int i = 0; i < splitCount - 1; i++)
+                graphEdges.Add(new Edge(splitNodes[i], splitNodes[i + 1], IG88PatrolRoute.None, IG88EdgeKind.Yellow));
+        }
+    }
+
     public static Vector3 NodePos(int i) { return nodes[i].position; }
     public static float PathDist(int a, int b) { return dist[a, b]; }
     public static int NextHop(int from, int goal) { return next[from, goal]; }
     public static List<IG88Link> Links(int node) { return links[node]; }
-    public static int[] RouteNodes(IG88Route r) { return r == IG88Route.Green ? GreenNodes : RedNodes; }
+    static readonly int[] G6ToG5Nodes = { G6, G5 };
+    static readonly int[] G5ToG2Nodes = { G5, G2 };
+    static readonly int[] G2ToG1Nodes = { G2, G1 };
+    static readonly int[] R5ToR4Nodes = { R5, R4 };
+    static readonly int[] R4ToR2Nodes = { R4, R2 };
+    static readonly int[] R2ToR1Nodes = { R2, R1 };
+    static readonly int[] NoRouteNodes = new int[0];
+
+    public static int[] RouteNodes(IG88PatrolRoute route)
+    {
+        switch (route)
+        {
+            case IG88PatrolRoute.G6ToG5: return G6ToG5Nodes;
+            case IG88PatrolRoute.G5ToG2: return G5ToG2Nodes;
+            case IG88PatrolRoute.G2ToG1: return G2ToG1Nodes;
+            case IG88PatrolRoute.R5ToR4: return R5ToR4Nodes;
+            case IG88PatrolRoute.R4ToR2: return R4ToR2Nodes;
+            case IG88PatrolRoute.R2ToR1: return R2ToR1Nodes;
+            default: return NoRouteNodes;
+        }
+    }
 
     /// <summary>True for waypoints where droids may not spawn or patrol (they are chase-only).</summary>
     public static bool IsNoPatrolNode(int node)
@@ -154,31 +261,30 @@ internal sealed class EnemyMoveSystem
         return false;
     }
 
-    /// <summary>True if a connection of this colour belongs to the patrol network of a route: its OWN colour plus the YELLOW ones.</summary>
-    public static bool PatrolEdgeMatches(IG88Route r, IG88EdgeKind kind)
+    /// <summary>True if a connection is the droid's assigned patrol segment.</summary>
+    public static bool PatrolEdgeMatches(IG88PatrolRoute route, IG88PatrolRoute edgeRoute)
     {
-        if (kind == IG88EdgeKind.Yellow) return true;
-        return r == IG88Route.Green ? kind == IG88EdgeKind.Green : kind == IG88EdgeKind.Red;
+        return route != IG88PatrolRoute.None && route == edgeRoute;
     }
 
-    /// <summary>True if the waypoint has at least one connection a droid of that route patrols (own colour or yellow).</summary>
-    public static bool NodeOnPatrolNetwork(int node, IG88Route r)
+    /// <summary>True if the waypoint belongs to the droid's assigned patrol segment.</summary>
+    public static bool NodeOnPatrolNetwork(int node, IG88PatrolRoute route)
     {
         List<IG88Link> ls = links[node];
         for (int i = 0; i < ls.Count; i++)
-            if (PatrolEdgeMatches(r, ls[i].kind)) return true;
+            if (PatrolEdgeMatches(route, ls[i].route)) return true;
         return false;
     }
 
-    public static IG88EdgeKind EdgeKindOf(int a, int b)
+    public static IG88PatrolRoute EdgeRouteOf(int a, int b)
     {
         // Use index-based loop to avoid heap-allocating an enumerator over a struct array.
-        for (int i = 0; i < Edges.Length; i++)
+        for (int i = 0; i < graphEdges.Count; i++)
         {
-            Edge e = Edges[i];
-            if ((e.a == a && e.b == b) || (e.a == b && e.b == a)) return e.kind;
+            Edge e = graphEdges[i];
+            if ((e.a == a && e.b == b) || (e.a == b && e.b == a)) return e.route;
         }
-        return IG88EdgeKind.Yellow;
+        return IG88PatrolRoute.None;
     }
 
     public static int NearestNode(Vector3 p)
@@ -194,7 +300,7 @@ internal sealed class EnemyMoveSystem
     }
 
     /// <summary>
-    /// The closest point on the whole waypoint track (green + red + yellow connections) to a world position.
+    /// The closest point on the chase track to a world position.
     /// The point lies on the connection a-b, t = 0 is at node a, t = 1 is at node b.
     /// </summary>
     public static bool ClosestTrackPoint(Vector3 p, out int a, out int b, out float t, out Vector3 point)
@@ -203,19 +309,26 @@ internal sealed class EnemyMoveSystem
         if (!graphReady) return false;
 
         float best = float.MaxValue;
-        for (int i = 0; i < Edges.Length; i++)
+        float bestEdgeLengthSquared = float.MaxValue;
+        for (int i = 0; i < graphEdges.Count; i++)
         {
-            Vector3 pa = nodes[Edges[i].a].position;
-            Vector3 pb = nodes[Edges[i].b].position;
+            Edge edge = graphEdges[i];
+            Vector3 pa = nodes[edge.a].position;
+            Vector3 pb = nodes[edge.b].position;
             Vector3 ab = pb - pa;
             float len2 = ab.sqrMagnitude;
             float tt = len2 > 1e-8f ? Mathf.Clamp01(Vector3.Dot(p - pa, ab) / len2) : 0f;
             Vector3 q = pa + ab * tt;
             float d = (q - p).sqrMagnitude;
-            if (d < best)
+            // When the original full edge and its split post segments overlap, prefer the shorter segment for chase goals.
+            // That lets a guard stop/chase along the local piece of track near its post instead of detouring to a far endpoint.
+            bool closer = d < best - 0.000001f;
+            bool sameDistanceButShorter = Mathf.Abs(d - best) <= 0.000001f && len2 < bestEdgeLengthSquared;
+            if (closer || sameDistanceButShorter)
             {
                 best = d;
-                a = Edges[i].a; b = Edges[i].b; t = tt; point = q;
+                bestEdgeLengthSquared = len2;
+                a = edge.a; b = edge.b; t = tt; point = q;
             }
         }
         return a >= 0;
@@ -224,8 +337,8 @@ internal sealed class EnemyMoveSystem
     // Reusable queue avoids allocating a new one per droid spawn.
     static readonly Queue<int> hopQueue = new Queue<int>();
 
-    /// <summary>Number of connections from 'start' to every waypoint, walking only along the patrol network of one route (its own colour + the yellow connections).</summary>
-    public static int[] RouteHops(IG88Route r, int start)
+    /// <summary>Number of connections from 'start' along one patrol segment.</summary>
+    public static int[] RouteHops(IG88PatrolRoute route, int start)
     {
         int[] hops = new int[nodes.Length];
         for (int i = 0; i < hops.Length; i++) hops[i] = 999;
@@ -238,7 +351,7 @@ internal sealed class EnemyMoveSystem
             List<IG88Link> ls = links[n];
             for (int i = 0; i < ls.Count; i++)
             {
-                bool ok = PatrolEdgeMatches(r, ls[i].kind);
+                bool ok = PatrolEdgeMatches(route, ls[i].route);
                 if (!ok || hops[ls[i].node] != 999) continue;
                 hops[ls[i].node] = hops[n] + 1;
                 hopQueue.Enqueue(ls[i].node);
@@ -256,8 +369,10 @@ internal sealed class EnemyMoveSystem
     readonly IG88Controller droid;      // the body: eye / gun tip positions and the direction it faces
     readonly Transform owner;
     readonly GameManager gm;            // settings, the player, line-of-sight test, droid collision
-    readonly IG88Route route;
-    readonly int[] homeHops;            // connections from my home waypoint, along my own patrol network
+    readonly IG88PatrolRoute route;
+    readonly int[] homeHops;            // connections from my home waypoint, along my assigned patrol segment
+    readonly bool standingGuard;
+    readonly int homeNode;
 
     Mode mode = Mode.Patrol;
 
@@ -277,8 +392,8 @@ internal sealed class EnemyMoveSystem
     float blockLimit;
     float backoffTimer;
 
-    float lastSightTime = -999f;   // last moment the droid SAW the player (a chase ends 'Lose Sight Time' seconds after this)
-    bool hasSeenPlayer;            // true from the first sighting until the droid gives up: only then may the Detection Radius be used
+    float lastSightTime = -999f;   // last sighting (or close-range guard detection)
+    bool hasSeenPlayer;            // normal patrol droids only use Detection Radius after their first sighting
     bool seesPlayer;               // this frame: player within Sight Range and a clear line of sight from the droid's head
     bool clearShot;                // this frame: seesPlayer AND the bolt path from the gun tip to the player is free
 
@@ -298,16 +413,18 @@ internal sealed class EnemyMoveSystem
     /// <summary>This frame: the droid sees the player AND a bolt from its gun tip would hit him.</summary>
     public bool ClearShot { get { return clearShot; } }
 
-    /// <summary>Puts the droid on its start waypoint. 'route' = its patrol colour (green or red), 'startNode' = its home waypoint.</summary>
-    public EnemyMoveSystem(IG88Controller droid, GameManager gm, IG88Route route, int startNode)
+    /// <summary>Puts the droid on its start waypoint. Guards stay there; patrol droids walk only their assigned segment.</summary>
+    public EnemyMoveSystem(IG88Controller droid, GameManager gm, IG88PatrolRoute route, int startNode, bool standingGuard)
     {
         this.droid = droid;
         this.gm = gm;
         this.route = route;
+        this.standingGuard = standingGuard;
         owner = droid.transform;
+        homeNode = startNode;
         fromNode = startNode;
         blockLimit = Random.Range(2f, 4f);
-        homeHops = RouteHops(route, startNode);   // my home = the waypoint I spawned on
+        homeHops = standingGuard ? null : RouteHops(route, startNode);
         owner.position = NodePos(startNode);
     }
 
@@ -319,6 +436,7 @@ internal sealed class EnemyMoveSystem
     {
         UpdateAwareness();
         if (gm.DroidPatrolOff) return false;   // Droid Patrol Off = stand still, do nothing
+        if (standingGuard && mode == Mode.Patrol && !returning) return false; // sentries stand at their post unless chasing or returning
         return Think(dt);
     }
 
@@ -332,9 +450,8 @@ internal sealed class EnemyMoveSystem
         bool canChase = !gm.DroidOff && !gm.DroidPatrolOff && p != null;
 
         // DETECTION (is the droid aware of the player right now?)
-        //  - FIRST detection is by SIGHT only: a clear line of sight closer than the Sight Range. The Detection Radius does nothing yet.
-        //  - After the droid has seen the player (and maybe lost sight) it may ALSO sense him inside the Detection Radius,
-        //    but only until 'Lose Sight Time' seconds after it LAST SAW him. After that it forgets him (see below) and needs sight again.
+        //  - Patrol droids first detect by sight and only use Detection Radius for a short time after sight.
+        //  - A stationary guard also detects the player through walls within its own small guard radius, even before seeing him.
         // 'seesPlayer' / 'clearShot' are worked out once per frame and are ALSO what the stopping and shooting use.
         seesPlayer = false;
         clearShot = false;
@@ -350,8 +467,14 @@ internal sealed class EnemyMoveSystem
                 // clear shot = it sees him AND the bolt would hit him (free path from the gun tip, not only from the head)
                 clearShot = droid.HasGun && gm.HasClearShot(droid.GunTipPosition, gm.PlayerAimPoint);
             }
+            bool guardRadius = standingGuard && d < gm.StationaryGuardDetectionRadius;
+            if (guardRadius)
+            {
+                hasSeenPlayer = true;
+                lastSightTime = Time.time;    // keep the guard aware while the player remains within its short radius
+            }
             bool radiusAllowed = hasSeenPlayer && Time.time <= lastSightTime + gm.LoseSightTime;
-            aware = seesPlayer || (radiusAllowed && d < gm.DetectionRadius);
+            aware = seesPlayer || guardRadius || (!standingGuard && radiusAllowed && d < gm.DetectionRadius);
         }
         else
         {
@@ -374,21 +497,33 @@ internal sealed class EnemyMoveSystem
             mode = Mode.Patrol;
             hasSeenPlayer = false;
             hasStopPoint = false;
-            BeginReturnToPatrol();
+            if (standingGuard)
+            {
+                returning = fromNode != homeNode || toNode >= 0;
+                goalNode = homeNode;
+            }
+            else BeginReturnToPatrol();
         }
     }
 
     // ------------------------------------------------------------------ patrol network / return to patrol
 
-    // my patrol network = connections of my own colour + the yellow ones
-    bool Matches(IG88EdgeKind kind)
+    // my patrol network = the one segment assigned to this droid
+    bool Matches(IG88PatrolRoute edgeRoute)
     {
-        return PatrolEdgeMatches(route, kind);
+        return PatrolEdgeMatches(route, edgeRoute);
     }
 
     void BeginReturnToPatrol()
     {
-        if (toNode >= 0) returning = !Matches(EdgeKindOf(fromNode, toNode));
+        if (standingGuard)
+        {
+            returning = fromNode != homeNode || toNode >= 0;
+            goalNode = homeNode;
+            return;
+        }
+
+        if (toNode >= 0) returning = !Matches(EdgeRouteOf(fromNode, toNode));
         else returning = !NodeOnPatrolNetwork(fromNode, route);
 
         if (returning)
@@ -416,7 +551,7 @@ internal sealed class EnemyMoveSystem
         return PathDist(fromNode, n);
     }
 
-    // nearest node of my patrol network (own colour + yellow), measured along the connections
+    // nearest endpoint of my assigned patrol segment, measured along the connections
     int NearestRouteNode()
     {
         int count = NodeCount;
@@ -501,11 +636,13 @@ internal sealed class EnemyMoveSystem
             return NextHop(fromNode, goalNode);
         }
 
-        // patrol: random walk over the connections of MY patrol network (own colour + yellow)
+        if (standingGuard) return -1;
+
+        // patrol: walk only the assigned route segment
         tmp.Clear();
         List<IG88Link> ls = Links(fromNode);
         for (int i = 0; i < ls.Count; i++)
-            if (Matches(ls[i].kind) && !IsNoPatrolNode(ls[i].node)) tmp.Add(ls[i].node);
+            if (Matches(ls[i].route) && !IsNoPatrolNode(ls[i].node)) tmp.Add(ls[i].node);
         if (tmp.Count == 0) return -1;
 
         // 1) stay in my own patrol zone (a few waypoints around my home). Outside of it (e.g. after a chase) head back toward home.

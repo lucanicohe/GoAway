@@ -13,14 +13,30 @@ public class BlasterBolt : MonoBehaviour
     private float halfLength;
     private float castRadius;
     private Light[] lights;
+    private AudioSource flightAudio;
 
     public bool InFlight { get { return gameObject.activeSelf; } }
 
-    public void Setup(BlasterWeapon weapon, float length, float radius)
+    public void Setup(BlasterWeapon weapon, float length, float radius,
+                      AudioClip flightSound, float flightVolume, float minDistance, float maxDistance)
     {
         owner = weapon;
         halfLength = length * 0.5f;
         castRadius = radius;
+
+        if (flightSound != null)
+        {
+            flightAudio = gameObject.AddComponent<AudioSource>();
+            flightAudio.clip = flightSound;
+            flightAudio.loop = true;
+            flightAudio.playOnAwake = false;
+            flightAudio.spatialBlend = 1f;
+            flightAudio.dopplerLevel = 0f;
+            flightAudio.rolloffMode = AudioRolloffMode.Logarithmic;
+            flightAudio.minDistance = minDistance;
+            flightAudio.maxDistance = Mathf.Max(minDistance, maxDistance);
+            flightAudio.volume = flightVolume;
+        }
     }
 
     /// <summary>Start the bolt with its tail at the muzzle.</summary>
@@ -32,6 +48,8 @@ public class BlasterBolt : MonoBehaviour
         transform.SetPositionAndRotation(muzzlePosition + direction * halfLength, Quaternion.LookRotation(direction));
         NoShadows();
         gameObject.SetActive(true);
+        if (flightAudio != null)
+            flightAudio.Play();
     }
 
     // every light on the bolt gets shadows off (done once, on the first launch)
@@ -57,13 +75,20 @@ public class BlasterBolt : MonoBehaviour
         {
             transform.position = hit.point - direction * halfLength;
             owner.RegisterHit(hit, direction);
-            gameObject.SetActive(false);
+            Despawn();
             return;
         }
 
         transform.position += direction * step;
         remaining -= step;
         if (remaining <= 0f)
-            gameObject.SetActive(false);
+            Despawn();
+    }
+
+    private void Despawn()
+    {
+        if (flightAudio != null)
+            flightAudio.Stop();
+        gameObject.SetActive(false);
     }
 }

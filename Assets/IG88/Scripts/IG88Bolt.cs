@@ -18,6 +18,7 @@ public class IG88Bolt : MonoBehaviour
     bool inFlight;
     readonly RaycastHit[] hits = new RaycastHit[16];
     Light[] lights;
+    AudioSource flightAudio;
 
     public bool InFlight { get { return inFlight; } }
 
@@ -29,6 +30,10 @@ public class IG88Bolt : MonoBehaviour
         gm = manager;
         castRadius = radius;
         IsFlathead = flathead;
+
+        flightAudio = gameObject.AddComponent<AudioSource>();
+        if (gm != null)
+            gm.ConfigureEnemyBoltFlightAudio(flightAudio);
     }
 
     public void Launch(Vector3 origin, Vector3 direction, float boltSpeed, float maxRange, float boltDamage,
@@ -43,6 +48,8 @@ public class IG88Bolt : MonoBehaviour
         ApplyLights(lightIntensity, lightRange, lightColor);
         inFlight = true;
         gameObject.SetActive(true);
+        if (flightAudio != null && flightAudio.clip != null)
+            flightAudio.Play();
     }
 
     // Every light on the bolt: shadows always off, intensity / range / colour from the GameManager (so the Inspector values work live).
@@ -68,6 +75,8 @@ public class IG88Bolt : MonoBehaviour
     {
         if (!inFlight) return;
         inFlight = false;
+        if (flightAudio != null)
+            flightAudio.Stop();
         if (gm != null) gm.ReleaseDroidBolt(this);
         else gameObject.SetActive(false);
     }
