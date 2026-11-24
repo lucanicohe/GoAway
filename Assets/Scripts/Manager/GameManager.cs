@@ -441,7 +441,30 @@ public class GameManager : MonoBehaviour
             if (player == null && Time.unscaledTime >= nextPlayerSearch)
             {
                 nextPlayerSearch = Time.unscaledTime + 0.5f;
-                GameObject go = GameObject.FindGameObjectWithTag("Player");
+                GameObject go = null;
+                try
+                {
+                    go = GameObject.FindGameObjectWithTag("Player");
+                }
+                catch (UnityException)
+                {
+                    // A project can lose the built-in tag in Tag Manager. Fall back to the known player motor below.
+                }
+
+                // FirstPersonMotor moves the Rigidbody on its own GameObject. A Player tag on an empty wrapper must resolve
+                // to that moving object, or the AI and CullingGroup will track the wrapper's stationary position instead.
+                FPCam.FirstPersonMotor motor = null;
+                if (go != null)
+                {
+                    motor = go.GetComponent<FPCam.FirstPersonMotor>();
+                    if (motor == null) motor = go.GetComponentInChildren<FPCam.FirstPersonMotor>();
+                    if (motor == null) motor = go.GetComponentInParent<FPCam.FirstPersonMotor>();
+                }
+
+                // If there was no Player-tagged object, recover by finding the active motor directly.
+                if (motor == null) motor = FindFirstObjectByType<FPCam.FirstPersonMotor>();
+                if (motor != null) go = motor.gameObject;
+
                 if (go != null) player = go.transform;
             }
             return player;

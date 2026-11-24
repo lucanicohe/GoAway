@@ -41189,7 +41189,7 @@ MonoBehaviour:
   flatheadAimThreatRange: 200
   flatheadSneakSpeed: 3
   flatheadFleeSpeed: 5
-  flatheadStrikeDistance: 9
+  flatheadStrikeDistance: 6
   flatheadShotsPerStrike: 12
   flatheadRetreatTime: 6
   flatheadReplaceDelay: 1
@@ -54004,7 +54004,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7799069200043406736, guid: 0e6942d68e2a24be7b177559c395581c, type: 3}
       propertyPath: m_TagString
-      value: Player
+      value: Untagged
       objectReference: {fileID: 0}
     - target: {fileID: 9117907316934795728, guid: 0e6942d68e2a24be7b177559c395581c, type: 3}
       propertyPath: m_CullingMask.m_Bits

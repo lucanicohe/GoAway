@@ -429,15 +429,20 @@ internal sealed class EnemyMoveSystem
     }
 
     /// <summary>
-    /// One frame of detection + movement. Returns true when the droid actually moved (drives the walk animation).
-    /// Droid Off / Droid Patrol Off from the GameManager are handled here.
+    /// Advances movement. Sight and chase state are refreshed separately so CullingGroup distance LOD cannot delay detection.
+    /// Returns true when the droid actually moved (drives the walk animation). Droid Patrol Off is handled here.
     /// </summary>
     public bool Tick(float dt)
     {
-        UpdateAwareness();
         if (gm.DroidPatrolOff) return false;   // Droid Patrol Off = stand still, do nothing
         if (standingGuard && mode == Mode.Patrol && !returning) return false; // sentries stand at their post unless chasing or returning
         return Think(dt);
+    }
+
+    /// <summary>Refreshes sight and chase state independently of the distance-based movement LOD.</summary>
+    public void RefreshAwareness()
+    {
+        UpdateAwareness();
     }
 
     // ------------------------------------------------------------------ detection
