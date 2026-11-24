@@ -411,16 +411,22 @@ internal sealed class FlatheadMoveSystem
         owner.SetPositionAndRotation(NodePos(startNode), bot.PoseRotation(fwd, up));
     }
 
-    /// <summary>One frame of detection + movement. Returns true when the robot walked this frame.</summary>
+    /// <summary>Advances movement after awareness was refreshed. Returns true when the robot walked this frame.</summary>
     public bool Tick(float dt, bool playerAimingAt)
     {
         this.playerAimingAt = playerAimingAt && !gm.DroidOff && !gm.DroidPatrolOff && gm.PlayerAlive;
-        UpdateAwareness();
         UpdateMode(dt);
         UpdateSpeed(dt);
         if (onJump) return UpdateJump(dt);            // a jump is always finished, whatever happens
         if (gm.DroidPatrolOff) { LegsOff(dt); return false; }
         return Think(dt);
+    }
+
+    /// <summary>Refreshes sight, sensing, and direct-aim response independently of the distance-based movement LOD.</summary>
+    public void RefreshAwareness(bool playerAimingAt)
+    {
+        this.playerAimingAt = playerAimingAt && !gm.DroidOff && !gm.DroidPatrolOff && gm.PlayerAlive;
+        UpdateAwareness();
     }
 
     // ------------------------------------------------------------------ detection (same rules as the IG-88)

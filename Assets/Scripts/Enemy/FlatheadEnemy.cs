@@ -178,6 +178,8 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
         // Band 3 (100m+):   ~1 Hz (interval 1.0s)
         float interval = distanceBand == 0 ? 0f : (distanceBand == 1 ? 0.1f : (distanceBand == 2 ? 0.5f : 1.0f));
         bool playerAimingAt = gm.IsPlayerAimingAt(this);
+        // Sensing and direct-aim reactions are gameplay-critical, so do not wait for the distance movement interval.
+        move.RefreshAwareness(playerAimingAt);
         bool urgentTick = playerAimingAt || move.PlayerAimingAt;
         aiAccumulatedDt += dt;
         // A hunting Flathead or one under the player's crosshair is updated every frame for responsive evasion and defensive fire.

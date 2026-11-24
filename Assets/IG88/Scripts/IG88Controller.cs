@@ -659,19 +659,23 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
         if (!ready || gm == null || move == null) return;
         float dt = Time.deltaTime;
 
-        // CullingGroup Distance LOD:
+        // Detection and line-of-sight are gameplay-critical, so keep them live at every distance.
+        // CullingGroup distance bands may reduce patrol movement frequency, but must never delay noticing or shooting at the player.
+        move.RefreshAwareness();
+
+        // CullingGroup distance LOD applies to patrol movement only:
         // Band 0 (0-20m):   full frame rate
         // Band 1 (20-50m):  ~10 Hz (interval 0.1s)
         // Band 2 (50-100m): ~2 Hz (interval 0.5s)
         // Band 3 (100m+):   ~1 Hz (interval 1.0s)
         float interval = distanceBand == 0 ? 0f : (distanceBand == 1 ? 0.1f : (distanceBand == 2 ? 0.5f : 1.0f));
         aiAccumulatedDt += dt;
-        // a chasing droid is never slowed down by distance: sight, aiming and shooting need every frame
-        bool shouldTickAI = interval <= 0f || aiAccumulatedDt >= interval || move.Chasing;
+        // A chasing droid moves every frame too; patrol movement alone uses the distance interval.
+        bool shouldUpdateMovement = interval <= 0f || aiAccumulatedDt >= interval || move.Chasing;
 
-        if (shouldTickAI)
+        if (shouldUpdateMovement)
         {
-            // Detection + waypoint movement using accumulated dt so speed and distance are exact
+            // Waypoint movement uses accumulated dt so speed and distance stay correct at the reduced update rate.
             walking = move.Tick(aiAccumulatedDt);
             aiAccumulatedDt = 0f;
         }
