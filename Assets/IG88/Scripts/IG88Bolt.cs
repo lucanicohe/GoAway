@@ -12,6 +12,7 @@ public class IG88Bolt : MonoBehaviour
     float speed, range, travelled, damage;
     Vector3 dir = Vector3.forward;
     readonly RaycastHit[] hits = new RaycastHit[16];
+    Light[] lights;
 
     public void Setup(GameManager manager, float radius)
     {
@@ -27,7 +28,17 @@ public class IG88Bolt : MonoBehaviour
         damage = boltDamage;
         travelled = 0f;
         transform.SetPositionAndRotation(origin, Quaternion.LookRotation(dir));
+        NoShadows();
         gameObject.SetActive(true);
+    }
+
+    // every light on the bolt gets shadows off (done once, on the first launch)
+    void NoShadows()
+    {
+        if (lights != null) return;
+        lights = GetComponentsInChildren<Light>(true);
+        for (int i = 0; i < lights.Length; i++)
+            lights[i].shadows = LightShadows.None;
     }
 
     void Update()

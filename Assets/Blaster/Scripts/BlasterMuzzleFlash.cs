@@ -47,6 +47,8 @@ public class BlasterMuzzleFlash : MonoBehaviour
     [SerializeField] private Color lightColor = new Color(0.3f, 1f, 0.35f, 1f);
     [SerializeField] private float lightIntensity = 4f;
     [SerializeField] private float lightRange = 7f;
+    [Tooltip("Moves the flash light up or down (local Y of this object). 0 = on the barrel axis.")]
+    [SerializeField] private float lightYOffset = 0f;
 
     private Vector3[] baseScales;
     private float[] rolls;
@@ -78,7 +80,7 @@ public class BlasterMuzzleFlash : MonoBehaviour
         {
             GameObject go = new GameObject("Flash Light");
             go.transform.SetParent(transform, false);
-            go.transform.localPosition = new Vector3(0f, 0f, 0.1f);
+            go.transform.localPosition = new Vector3(0f, lightYOffset, 0.1f);
             flashLight = go.AddComponent<Light>();
             flashLight.type = LightType.Point;
             flashLight.color = lightColor;
@@ -139,7 +141,10 @@ public class BlasterMuzzleFlash : MonoBehaviour
         ApplyOrientation();
 
         if (flashLight != null)
+        {
+            flashLight.transform.localPosition = new Vector3(0f, lightYOffset, 0.1f);
             flashLight.enabled = !thermalLook;
+        }
     }
 
     /// <summary>BlasterWeapon.SetThermalLook calls this. The flash light is off in thermal mode.</summary>

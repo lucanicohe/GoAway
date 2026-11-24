@@ -12,6 +12,7 @@ public class BlasterBolt : MonoBehaviour
     private float remaining;
     private float halfLength;
     private float castRadius;
+    private Light[] lights;
 
     public bool InFlight { get { return gameObject.activeSelf; } }
 
@@ -29,7 +30,18 @@ public class BlasterBolt : MonoBehaviour
         speed = boltSpeed;
         remaining = range;
         transform.SetPositionAndRotation(muzzlePosition + direction * halfLength, Quaternion.LookRotation(direction));
+        NoShadows();
         gameObject.SetActive(true);
+    }
+
+    // every light on the bolt gets shadows off (done once, on the first launch)
+    private void NoShadows()
+    {
+        if (lights != null)
+            return;
+        lights = GetComponentsInChildren<Light>(true);
+        for (int i = 0; i < lights.Length; i++)
+            lights[i].shadows = LightShadows.None;
     }
 
     private void Update()

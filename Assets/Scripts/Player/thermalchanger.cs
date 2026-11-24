@@ -150,6 +150,7 @@ public class ThermalChanger : MonoBehaviour
             visorHud.showSideArcs = false;
             visorHud.showCrosshair = true;
             visorHud.showCompass = true;
+            visorHud.showBars = true;      // health + ammo bars visible in normal mode
         }
 
         SetPostExposure(normalPostExposure);
@@ -322,6 +323,7 @@ public class ThermalChanger : MonoBehaviour
             visorHud.showSideArcs = true;
             visorHud.showCrosshair = false;
             visorHud.showCompass = false;
+            visorHud.showBars = false;     // health + ammo bars ticked off in thermal mode
         }
 
         if (blaster != null)
@@ -575,6 +577,7 @@ public class ThermalChanger : MonoBehaviour
             visorHud.showSideArcs = false;
             visorHud.showCrosshair = true;
             visorHud.showCompass = true;
+            visorHud.showBars = true;      // health + ammo bars visible in normal mode
         }
 
         if (blaster != null)

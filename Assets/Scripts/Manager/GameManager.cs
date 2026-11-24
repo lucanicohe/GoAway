@@ -8,9 +8,9 @@ using FlatheadRobotKit;
 [DefaultExecutionOrder(-50)] // runs before most player scripts
 public class GameManager : MonoBehaviour
 {
-    // One droid per waypoint is the physical maximum: there are 11 waypoints (G1-G6, R1-R5) and droids
-    // can spawn and patrol on all of them.
-    public const int MaxDroids = 11;
+    // One droid per spawn / patrol waypoint is the physical maximum: there are 11 waypoints (G1-G6, R1-R5), but G3, G4 and R3
+    // are chase-only (droids never spawn or patrol there), which leaves 8: G1, G2, G5, G6, R1, R2, R4, R5.
+    public const int MaxDroids = 8;
 
     // One Flathead per waypoint is the physical maximum: 20 waypoints (W1-W13 on the walls, T1-T7 on the ceiling).
     public const int MaxFlatheads = 20;
@@ -62,7 +62,7 @@ public class GameManager : MonoBehaviour
     [Header("IG-88 Spawning")]
     [Tooltip("Drag your IG88 prefab here (it must have the IG88Controller on its root).")]
     [SerializeField] private IG88Controller ig88Prefab;
-    [Tooltip("How many droids to spawn. Max = 11 (one per waypoint, G1 and R1 included). They alternate: green patrol, red patrol, green, red ... Every start one droid stands on G2 and one on R2 or R3; the rest are spread out on free waypoints.")]
+    [Tooltip("How many droids to spawn. Max = 8 (one per spawn / patrol waypoint: G1, G2, G5, G6, R1, R2, R4, R5. G3, G4 and R3 are chase-only). They alternate: green patrol, red patrol, green, red ... Every start one droid stands on G2 and one on R2; the rest are spread out on free waypoints.")]
     [Range(0, MaxDroids)]
     [SerializeField] private int droidCount = 4;
 
@@ -131,6 +131,10 @@ public class GameManager : MonoBehaviour
     [Tooltip("Drag the droid's glow material here (the one with the green emission). Each droid gets its own copy, " +
              "its emission goes green -> red on chase, the original asset is not changed.")]
     [SerializeField] private Material droidGlowMaterial;
+
+    [Header("IG-88 Bolt Light (the red light on every droid bolt, works live while playing)")]
+    [SerializeField] private float droidBoltLightIntensity = 2f;
+    [SerializeField] private float droidBoltLightRange = 5f;
 
     [Header("IG-88 Patrol")]
     [Tooltip("Every droid patrols around the waypoint it spawned on. It only walks to waypoints at most this many connections away from its home. " +
@@ -258,6 +262,7 @@ public class GameManager : MonoBehaviour
     // ----- droid bolt pools (built once in Start, nothing is instantiated while shooting) -----
     Transform droidBoltRoot, droidSparkRoot;
     readonly List<IG88Bolt> droidBolts = new List<IG88Bolt>();
+    readonly List<Light> droidBoltLights = new List<Light>();
     readonly List<BlasterHitSparks> droidSparks = new List<BlasterHitSparks>();
     int nextDroidBolt, nextDroidSpark;
     Material boltCoreMat, boltGlowMat, boltGlowOuterMat, sparkRedMat, sparkWhiteMat, flashRedMat;
@@ -479,11 +484,12 @@ public class GameManager : MonoBehaviour
 
     private void UpdateAmmoUI()
     {
-        // Visor HUD (0-1)
+        // Visor HUD (0-1) + live number text
         if (visorHud != null)
         {
             float normalized = maxAmmo > 0 ? (float)currentAmmo / maxAmmo : 0f;
             visorHud.SetAmmo(normalized);
+            visorHud.SetAmmoNumber(currentAmmo);
         }
 
         // 3D TextMeshPro
@@ -495,11 +501,12 @@ public class GameManager : MonoBehaviour
 
     private void UpdateHealthUI()
     {
-        // Visor HUD (0-1), same way as the ammo bar
+        // Visor HUD (0-1) + live number text (shows 120 → 0 etc.)
         if (visorHud != null)
         {
             float normalized = playerMaxHealth > 0f ? playerHealth / playerMaxHealth : 0f;
             visorHud.SetHealth(normalized);
+            visorHud.SetHealthNumber(Mathf.RoundToInt(playerHealth));
         }
     }
 
@@ -651,9 +658,9 @@ public class GameManager : MonoBehaviour
 
         int count = Mathf.Clamp(droidCount, 0, MaxDroids);
 
-        // Guaranteed start spots: every start one droid stands on G2 (green) and one on R2 or R3 (red, picked at random).
+        // Guaranteed start spots: every start one droid stands on G2 (green) and one on R2 (red). G3, G4 and R3 are never used.
         // With only 1 droid, one of those two spots is used (at random).
-        int[] forcedNodes = { EnemyMoveSystem.G2, Random.value < 0.5f ? EnemyMoveSystem.R2 : EnemyMoveSystem.R3 };
+        int[] forcedNodes = { EnemyMoveSystem.G2, EnemyMoveSystem.R2 };
         IG88Route[] forcedRoutes = { IG88Route.Green, IG88Route.Red };
         int firstForced = (count == 1 && Random.value < 0.5f) ? 1 : 0;
 
@@ -666,8 +673,6 @@ public class GameManager : MonoBehaviour
             if (fi < forcedNodes.Length)
             {
                 int n = forcedNodes[fi];
-                if (!NodeFree(n) && forcedRoutes[fi] == IG88Route.Red)
-                    n = (n == EnemyMoveSystem.R2) ? EnemyMoveSystem.R3 : EnemyMoveSystem.R2;                 // the other red spot
                 if (NodeFree(n)) { node = n; route = forcedRoutes[fi]; }
             }
             if (node < 0)
@@ -697,6 +702,15 @@ public class GameManager : MonoBehaviour
         droids.Clear();
     }
 
+    /// <summary>
+    /// G3, G4 and R3 are chase-only waypoints: droids never spawn or patrol there, but they still walk to them when they chase the player.
+    /// Node numbers follow the waypoint array in BuildGraph (g1..g6 = 0..5, r1..r5 = 6..10), so G3 = 2, G4 = 3, R3 = 8.
+    /// </summary>
+    public static bool IsChaseOnlyNode(int node)
+    {
+        return node == 2 || node == 3 || node == EnemyMoveSystem.R3;
+    }
+
     // true if no droid stands within 'Min Droid Distance' of that waypoint
     private bool NodeFree(int node)
     {
@@ -717,6 +731,7 @@ public class GameManager : MonoBehaviour
         float bestScore = -1f;
         for (int i = 0; i < list.Length; i++)
         {
+            if (IsChaseOnlyNode(list[i])) continue;                       // G3, G4, R3: no spawning there
             if (EnemyMoveSystem.IsNoPatrolNode(list[i])) continue;
             Vector3 p = EnemyMoveSystem.NodePos(list[i]);
             float nearest = float.MaxValue;
@@ -815,9 +830,10 @@ public class GameManager : MonoBehaviour
         Light l = root.AddComponent<Light>();
         l.type = LightType.Point;
         l.color = droidRed;
-        l.intensity = 2f;
-        l.range = 5f;
+        l.intensity = droidBoltLightIntensity;
+        l.range = droidBoltLightRange;
         l.shadows = LightShadows.None;
+        droidBoltLights.Add(l);
 
         root.SetActive(false);
         return bolt;
@@ -870,6 +886,11 @@ public class GameManager : MonoBehaviour
     {
         if (droidBolts.Count == 0) return;
         IG88Bolt b = droidBolts[nextDroidBolt];
+        if (nextDroidBolt < droidBoltLights.Count && droidBoltLights[nextDroidBolt] != null)
+        {
+            droidBoltLights[nextDroidBolt].intensity = droidBoltLightIntensity;
+            droidBoltLights[nextDroidBolt].range = droidBoltLightRange;
+        }
         nextDroidBolt = (nextDroidBolt + 1) % droidBolts.Count;
         b.Launch(origin, direction, droidBoltSpeed, DroidBoltRange, droidDamage);
     }

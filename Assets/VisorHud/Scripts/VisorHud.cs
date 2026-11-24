@@ -18,6 +18,8 @@ public class VisorHudPart
 /// Visor HUD controller (Republic-Commando style). Sits on the root of the "Visor HUD" canvas prefab.
 /// Drag the sliders in the Inspector (works live, also while the game is running):
 ///   Health = left green striped bar        Ammo = right red striped bar
+/// Each bar empties along an angle you pick in the Inspector (Health leans one way, Ammo the mirror of it).
+/// The stripes are never scaled or squished - the bar is just cut off along a straight line (see VisorHudBarWipe.cs).
 /// From your own code:   hud.SetHealth(0.5f);   hud.SetAmmo(0.25f);     (values 0 - 1)
 /// Every visor / HUD element has its own colour and its own opacity slider.
 /// The top line is a compass (N E S W) that follows the Main Camera (or any Transform you assign).
@@ -41,6 +43,12 @@ public class VisorHud : MonoBehaviour
     [Range(0f, 1f)] public float emptyBarOpacity = 0.35f;
     [Tooltip("Seconds the bars take to follow a change while playing. 0 = instant.")]
     [Range(0f, 1f)] public float smoothTime = 0.12f;
+
+    [Header("Bar empty angle  (degrees - the way each bar goes empty, as seen on screen)")]
+    [Tooltip("Direction the health bar empties in. 0 = toward the right, 180 = toward the left (right end empties first), 90 = up, -90 = down. In between it tilts, e.g. 147 = toward the left and tilted 33 degrees up. If it tilts the wrong way use -147.")]
+    [Range(-180f, 180f)] public float healthEmptyAngle = 147f;
+    [Tooltip("Direction the ammo bar empties in. 0 = toward the right (left end empties first), 180 = toward the left, 90 = up, -90 = down. In between it tilts, e.g. 33 = toward the right and tilted 33 degrees up. If it tilts the wrong way use -33.")]
+    [Range(-180f, 180f)] public float ammoEmptyAngle = 33f;
 
     [Header("HUD parts (tick to show / hide)")]
     public bool showTopVisor = true;
@@ -91,6 +99,16 @@ public class VisorHud : MonoBehaviour
     [Range(0f, 1f)] public float ammoLabelOpacity = 1f;
     [Range(10f, 48f)] public float labelSize = 22f;
 
+    [Header("Number texts  (live health 120 -> 0 and ammo count)")]
+    [Tooltip("Optional. Leave empty and the label under the health bar shows the health number.")]
+    public Text healthNumberText;
+    [Tooltip("Optional. Leave empty and the label under the ammo bar shows the ammo number.")]
+    public Text ammoNumberText;
+    public Color numberColor = new Color(0.84f, 0.93f, 0.96f, 1f);
+    [Range(0f, 1f)] public float healthNumberOpacity = 1f;
+    [Range(0f, 1f)] public float ammoNumberOpacity = 1f;
+    [Range(10f, 64f)] public float numberSize = 28f;
+
     [Header("Wiring (filled in automatically - leave alone)")]
     public Image healthFill;
     public Image healthBack;
@@ -103,10 +121,11 @@ public class VisorHud : MonoBehaviour
     [UnityEngine.HideInInspector] public Image topBodyImage, topEdgeImage, compassLineImage, compassTicksImage;
     [UnityEngine.HideInInspector] public Image leftArcImage, rightArcImage;
     [UnityEngine.HideInInspector] public Image leftPanelBodyImage, leftPanelEdgeImage, rightPanelBodyImage, rightPanelEdgeImage;
+    [UnityEngine.HideInInspector] public VisorHudBarWipe healthWipe, ammoWipe;   // cut-off effect on each Fill (added automatically)
     [UnityEngine.HideInInspector] public RectTransform compassArea;
     [UnityEngine.HideInInspector] public Text[] compassTexts;
 
-    float shownHealth = 1f, shownAmmo = 1f, healthVel, ammoVel;
+    float shownHealth = 1f, shownAmmo = 1f;
     float lastYaw;
 
     public float Health { get { return health; } set { health = Mathf.Clamp01(value); } }
@@ -144,8 +163,10 @@ public class VisorHud : MonoBehaviour
     {
         if (Application.isPlaying && smoothTime > 0.0001f)
         {
-            shownHealth = Mathf.SmoothDamp(shownHealth, health, ref healthVel, smoothTime);
-            shownAmmo = Mathf.SmoothDamp(shownAmmo, ammo, ref ammoVel, smoothTime);
+            // starts moving at full speed right away (no slow ease-in) and is practically there after smoothTime seconds
+            float k = 1f - Mathf.Exp(-3f * Time.deltaTime / smoothTime);
+            shownHealth = Mathf.Abs(health - shownHealth) < 0.0005f ? health : Mathf.Lerp(shownHealth, health, k);
+            shownAmmo = Mathf.Abs(ammo - shownAmmo) < 0.0005f ? ammo : Mathf.Lerp(shownAmmo, ammo, k);
         }
         else
         {
@@ -219,6 +240,93 @@ public class VisorHud : MonoBehaviour
             Transform t = FindDeep(transform, letterNames[i]);
             if (t != null) compassTexts[i] = t.GetComponent<Text>();
         }
+
+        EnsureWipes();
+        HideOldTopFills();
+    }
+
+    // An earlier version of this script added a "Fill Top" child to each Fill. It is not used any more,
+    // so it gets switched off here (you can delete it by hand if you see it in the Hierarchy).
+    void HideOldTopFills()
+    {
+        HideOldTop(healthFill);
+        HideOldTop(ammoFill);
+    }
+
+    static void HideOldTop(Image fill)
+    {
+        if (fill == null) return;
+        Transform t = fill.transform.Find("Fill Top");
+        if (t != null && t.gameObject.activeSelf) t.gameObject.SetActive(false);
+    }
+
+    // older versions of this script squished the bar with localScale - undo that if it was saved in the scene
+    static void FixScale(Image img)
+    {
+        RectTransform rt = img.rectTransform;
+        Vector3 s = rt.localScale;
+        if (s.y >= 0f && s.y < 0.9999f) { s.y = 1f; rt.localScale = s; }
+    }
+
+    // ---------- bars that empty along an angle ----------
+    // The Fill image is a plain (Simple) image and a small effect (VisorHudBarWipe) clips it along a straight line.
+    // Nothing is scaled, so the stripes keep their size. The effect is added to each Fill automatically.
+
+    void EnsureWipes()
+    {
+        bool need = (healthFill != null && healthWipe == null) || (ammoFill != null && ammoWipe == null);
+        if (!need) return;
+#if UNITY_EDITOR
+        if (!Application.isPlaying)
+        {
+            // adding components while a scene / prefab is loading is not allowed, so do it a moment later
+            UnityEditor.EditorApplication.delayCall += () =>
+            {
+                if (this == null) return;
+                BuildWipes();
+                Apply();
+            };
+            return;
+        }
+#endif
+        BuildWipes();
+    }
+
+    void BuildWipes()
+    {
+        if (healthFill != null && healthWipe == null) healthWipe = GetOrAddWipe(healthFill);
+        if (ammoFill != null && ammoWipe == null) ammoWipe = GetOrAddWipe(ammoFill);
+#if UNITY_EDITOR
+        if (!Application.isPlaying) UnityEditor.EditorUtility.SetDirty(this);
+#endif
+    }
+
+    static VisorHudBarWipe GetOrAddWipe(Image fill)
+    {
+        VisorHudBarWipe w = fill.GetComponent<VisorHudBarWipe>();
+        if (w == null) w = fill.gameObject.AddComponent<VisorHudBarWipe>();
+        return w;
+    }
+
+    // screen-space angle (0 = right, 90 = up) -> direction in the Fill's own space, so it still looks right if the bar is rotated or flipped
+    Vector2 LocalWipeDir(RectTransform rt, float angleDeg)
+    {
+        float a = angleDeg * Mathf.Deg2Rad;
+        Vector3 world = transform.TransformDirection(new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f));
+        Vector3 local = rt.InverseTransformVector(world);
+        Vector2 d = new Vector2(local.x, local.y);
+        return d.sqrMagnitude > 0.000001f ? d.normalized : new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+    }
+
+    void ApplyBar(Image fill, VisorHudBarWipe wipe, float value, Color color, float opacity, float angle)
+    {
+        if (fill == null) return;
+        FixScale(fill);
+        fill.color = WithAlpha(color, opacity);
+        if (wipe == null) return;                                         // effect is added a moment after the first Apply
+
+        if (fill.type != Image.Type.Simple) fill.type = Image.Type.Simple;   // the effect does the cutting, not the Image fill
+        wipe.Set(Mathf.Clamp01(value), LocalWipeDir(fill.rectTransform, angle));
     }
 
     static Color Dim(Color c, float alpha) { return new Color(c.r * 0.25f, c.g * 0.25f, c.b * 0.25f, alpha); }
@@ -236,6 +344,28 @@ public class VisorHud : MonoBehaviour
         t.color = WithAlpha(labelColor, opacity);
         int size = Mathf.RoundToInt(labelSize);
         if (t.fontSize != size) t.fontSize = size;
+    }
+
+    void ApplyNumber(Text t, float opacity)
+    {
+        if (t == null) return;
+        t.color = WithAlpha(numberColor, opacity);
+        int size = Mathf.RoundToInt(numberSize);
+        if (t.fontSize != size) t.fontSize = size;
+    }
+
+    /// <summary>Pushes the live health number (e.g. 120 -> 0) onto the number text, or onto the health label if none is assigned.</summary>
+    public void SetHealthNumber(int value)
+    {
+        Text t = healthNumberText != null ? healthNumberText : healthLabel;
+        if (t != null) t.text = value.ToString();
+    }
+
+    /// <summary>Pushes the live ammo number onto the number text, or onto the ammo label if none is assigned.</summary>
+    public void SetAmmoNumber(int value)
+    {
+        Text t = ammoNumberText != null ? ammoNumberText : ammoLabel;
+        if (t != null) t.text = value.ToString();
     }
 
     float ReadYaw()
@@ -283,13 +413,15 @@ public class VisorHud : MonoBehaviour
 
     void Apply()
     {
-        if (healthFill != null) { healthFill.fillAmount = Mathf.Clamp01(shownHealth); healthFill.color = WithAlpha(healthColor, healthBarOpacity); }
-        if (ammoFill != null) { ammoFill.fillAmount = Mathf.Clamp01(shownAmmo); ammoFill.color = WithAlpha(ammoColor, ammoBarOpacity); }
+        ApplyBar(healthFill, healthWipe, shownHealth, healthColor, healthBarOpacity, healthEmptyAngle);
+        ApplyBar(ammoFill, ammoWipe, shownAmmo, ammoColor, ammoBarOpacity, ammoEmptyAngle);
         if (healthBack != null) healthBack.color = Dim(healthColor, emptyBarOpacity * healthBarOpacity);
         if (ammoBack != null) ammoBack.color = Dim(ammoColor, emptyBarOpacity * ammoBarOpacity);
 
         ApplyLabel(healthLabel, healthLabelOpacity);
         ApplyLabel(ammoLabel, ammoLabelOpacity);
+        ApplyNumber(healthNumberText, healthNumberOpacity);
+        ApplyNumber(ammoNumberText, ammoNumberOpacity);
 
         // top visor: with the new layered prefab only the metal is hidden, so the compass can stay on its own
         if (topBodyImage != null)

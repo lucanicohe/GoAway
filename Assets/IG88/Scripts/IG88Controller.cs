@@ -64,6 +64,40 @@ public class IG88Controller : MonoBehaviour
     [Range(5f, 90f)] public float maxFireAngle = 35f;
     public bool drawGizmos = true;
 
+    [Header("Sounds (drag the 3D Audio Sources of this prefab in here)")]
+    [Tooltip("The patrol voice line. While the droid patrols it says it again 'Patrol Sound Gap' seconds after the previous one has FULLY played (never cut off, never restarted). Stops when the droid detects the player.")]
+    public AudioSource patrolSound;
+    [Tooltip("Seconds of silence between the END of one patrol line and the start of the next. Only counts while the droid patrols (not while chasing, not when Droid Patrol Off is on).")]
+    [Min(0f)] public float patrolSoundGap = 3f;
+    [Tooltip("Plays once at the moment the droid detects the player.")]
+    public AudioSource detectSound;
+    [Tooltip("The fire voice line, said when the droid shoots. It is never cut off or restarted: after it has FULLY played the droid waits 'Fire Sound Gap' seconds, then says it again on its next shot.")]
+    public AudioSource fireSound;
+    [Tooltip("Seconds of silence between the END of one fire line and the start of the next one.")]
+    [Min(0f)] public float fireSoundGap = 3f;
+    [Tooltip("Plays for every footstep while the droid walks (two steps per walk cycle, timed with the legs).")]
+    public AudioSource footstepSound;
+    [Tooltip("Plays once when the droid dies. Muffled when a wall is between the droid and the player.")]
+    public AudioSource deathSound;
+
+    [Header("Sounds: no stacking")]
+    [Tooltip("Two droids never start the same short sound (footstep) closer together than this many seconds. The second one is pushed back a little instead, so the two copies don't blur into one glitchy sound. Long sounds (patrol, detect, fire line) never start while another droid is still playing the same one.")]
+    [Range(0f, 0.5f)] public float sameSoundGap = 0.08f;
+    [Tooltip("Random pitch change for every footstep. 0.04 = plus or minus 4%. Stops identical copies from phasing.")]
+    [Range(0f, 0.2f)] public float pitchVariation = 0.04f;
+
+    [Header("Sounds through walls")]
+    [Tooltip("When a wall is between the droid and the player (the camera), the three sounds get quieter and muffled.")]
+    public bool muffleThroughWalls = true;
+    [Tooltip("Which layers count as walls. Default = everything solid. The droid itself, the player and other droids are always ignored. Trigger colliders are ignored too.")]
+    public LayerMask wallMask = ~0;
+    [Tooltip("Volume while a wall blocks the sound (1 = unchanged, 0.4 = 40%).")]
+    [Range(0f, 1f)] public float muffledVolume = 0.4f;
+    [Tooltip("Low pass cutoff in Hz while a wall blocks the sound. Lower = more muffled.")]
+    [Range(200f, 8000f)] public float muffledCutoff = 800f;
+    [Tooltip("Seconds to fade between clear and muffled.")]
+    [Range(0.01f, 1f)] public float muffleFadeTime = 0.15f;
+
     // ------------------------------------------------------------------ rig
 
     class RigBone
@@ -92,6 +126,29 @@ public class IG88Controller : MonoBehaviour
     bool wasChasing;        // to notice the moment a chase starts / ends
 
     float nextFireTime;
+    float patrolNextTime;   // real time (seconds) when the droid may say the patrol line again = end of the last line + Patrol Sound Gap
+    float fireNextTime;     // same for the fire line
+    float lastPlayEnd;      // real time when the sound PlaySound just started will have fully played
+
+    // sounds through walls: one entry per Audio Source (volume + low pass filter get changed while a wall blocks the sound)
+    class SoundMuffle
+    {
+        public AudioSource src;
+        public AudioLowPassFilter lowPass;
+        public float baseVolume;
+        public float basePitch;
+    }
+    readonly List<SoundMuffle> muffles = new List<SoundMuffle>();
+
+    // one slot per kind of sound, shared by ALL droids: remembers until when that sound is "taken" (real time, so it also survives Play Mode restarts)
+    enum DroidSound { Patrol, Detect, Fire, Step, Death }
+    static readonly float[] soundBusyUntil = new float[5];
+    const float MaxSoundDelay = 0.3f;   // a sound that would have to wait longer than this is skipped
+    const float HalfPi = Mathf.PI * 0.5f;
+    static readonly RaycastHit[] wallHits = new RaycastHit[16];
+    bool wallBlocked;
+    float muffleBlend;      // 0 = clear, 1 = muffled
+    float wallCheckTimer;
     Vector3 aimPoint;       // where the droid aims (centre of the player)
 
     // look (light + glow)
@@ -153,6 +210,21 @@ public class IG88Controller : MonoBehaviour
         health = gm.DroidHealth;
         alertBlend = 0f;
         wasChasing = false;
+        patrolNextTime = Time.realtimeSinceStartup + patrolSoundGap;   // first patrol line comes one gap after the spawn
+        fireNextTime = 0f;                                             // the first shot may say the fire line right away
+        PrepareSound(patrolSound);
+        PrepareSound(detectSound);
+        PrepareSound(fireSound);
+        PrepareSound(footstepSound);
+        PrepareSound(deathSound);
+        SetupMuffle(patrolSound);
+        SetupMuffle(detectSound);
+        SetupMuffle(fireSound);
+        SetupMuffle(footstepSound);
+        SetupMuffle(deathSound);
+        wallBlocked = false;
+        muffleBlend = 0f;
+        wallCheckTimer = 0f;
         move = new EnemyMoveSystem(this, gm, patrolRoute, startNode);   // puts the droid on its start waypoint
         SetupGlow();
         UpdateLook(0f);
@@ -421,6 +493,12 @@ public class IG88Controller : MonoBehaviour
         ready = false;
         walking = false;
         aimAtTarget = false;
+        // a dead droid is silent: no talking, no walking (the last shot sound may ring out), then the death sound
+        if (patrolSound != null) patrolSound.Stop();
+        if (detectSound != null) detectSound.Stop();
+        if (footstepSound != null) footstepSound.Stop();        // also cancels a step that was still waiting to start
+        UpdateSoundMuffle(0f, true);                            // wall between droid and player right now? the death sound follows it
+        PlaySound(deathSound, DroidSound.Death, true);
         if (chaseLight != null) chaseLight.enabled = false;     // a dead droid doesn't glow
         for (int i = 0; i < glowMats.Count; i++)
         {
@@ -561,14 +639,26 @@ public class IG88Controller : MonoBehaviour
         // detection + waypoint movement. Returns true when the droid really moved this frame -> drives the walk animation.
         walking = move.Tick(dt);
 
+        // hard stop any playing footstep the moment the droid stops moving
+        if (!walking && footstepSound != null && footstepSound.isPlaying)
+            footstepSound.Stop();
+
         // a chase starts / ends: aim at the player (or not), and the first shot is allowed right away
         bool chasing = move.Chasing;
         if (chasing != wasChasing)
         {
             wasChasing = chasing;
             aimAtTarget = chasing;
-            if (chasing) nextFireTime = Time.time;   // no delay: the gun only has to swing onto the player
+            patrolNextTime = Time.realtimeSinceStartup + patrolSoundGap;   // after a chase the next patrol line comes a full gap later
+            if (chasing)
+            {
+                nextFireTime = Time.time;            // no delay: the gun only has to swing onto the player
+                if (patrolSound != null) patrolSound.Stop();
+                PlaySound(detectSound, DroidSound.Detect, false);
+            }
         }
+        UpdatePatrolSound(chasing);
+        UpdateSoundMuffle(dt);
 
         Transform p = gm.Player;
         if (chasing && p != null) target = p;        // target = object tagged Player, found automatically
@@ -615,7 +705,155 @@ public class IG88Controller : MonoBehaviour
             Vector2 s = Random.insideUnitCircle * spread;
             dir = Quaternion.LookRotation(dir) * Quaternion.Euler(-s.y, s.x, 0f) * Vector3.forward;
         }
+        SayFireLine();                                 // the fire voice line: paced, see SayFireLine
         gm.FireDroidBolt(origin, dir);
+    }
+
+    // ------------------------------------------------------------------ sounds
+
+    // the three Audio Sources sit on the prefab: they must never loop or start on their own
+    static void PrepareSound(AudioSource s)
+    {
+        if (s == null) return;
+        s.loop = false;
+        s.playOnAwake = false;
+        s.Stop();
+    }
+
+    // Patrol line: while the droid patrols it says the line, and says it again 'Patrol Sound Gap' seconds AFTER it has fully played.
+    void UpdatePatrolSound(bool chasing)
+    {
+        if (patrolSound == null) return;
+        float now = Time.realtimeSinceStartup;
+        if (chasing || gm.DroidPatrolOff)
+        {
+            patrolNextTime = now + patrolSoundGap;       // not patrolling: after it the next line comes a full gap later
+            return;
+        }
+        if (now < patrolNextTime || patrolSound.isPlaying) return;   // still inside the gap, or the last line has not finished yet
+        if (PlaySound(patrolSound, DroidSound.Patrol, false))
+            patrolNextTime = lastPlayEnd + patrolSoundGap;           // the gap starts when the line has FULLY played
+        // blocked by another droid's patrol line = tries again next frame
+    }
+
+    // Fire line: said on a shot, never cut off or restarted. After it has fully played the droid waits 'Fire Sound Gap' seconds,
+    // then says it again on its next shot. Shots in between are silent.
+    void SayFireLine()
+    {
+        if (fireSound == null) return;
+        float now = Time.realtimeSinceStartup;
+        if (now < fireNextTime || fireSound.isPlaying) return;
+        if (PlaySound(fireSound, DroidSound.Fire, false))
+            fireNextTime = lastPlayEnd + fireSoundGap;
+    }
+
+    // Starts a droid sound without stacking it on the same sound of another droid.
+    // shortSound = footstep / death (random pitch, only a tiny gap is kept free). Not short = patrol / detect / fire line (the sound is kept free until it has finished).
+    // Returns false when the sound was skipped.
+    bool PlaySound(AudioSource s, DroidSound kind, bool shortSound)
+    {
+        if (s == null || s.clip == null) return false;
+
+        float pitch = BasePitch(s);
+        if (shortSound && pitchVariation > 0f) pitch *= 1f + Random.Range(-pitchVariation, pitchVariation);
+
+        float now = Time.realtimeSinceStartup;
+        float start = Mathf.Max(now, soundBusyUntil[(int)kind]);   // another droid is playing this sound = start right after it
+        float delay = start - now;
+        if (delay > MaxSoundDelay) return false;                   // would have to wait too long: skip it
+        float length = s.clip.length / Mathf.Max(0.1f, pitch);
+        soundBusyUntil[(int)kind] = start + (shortSound ? sameSoundGap : length);
+        lastPlayEnd = start + length;                              // when this sound will have fully played
+
+        s.pitch = pitch;
+        if (delay > 0.001f) s.PlayDelayed(delay);
+        else s.Play();
+        return true;
+    }
+
+    float BasePitch(AudioSource s)
+    {
+        for (int i = 0; i < muffles.Count; i++)
+            if (muffles[i].src == s) return muffles[i].basePitch;
+        return s.pitch;
+    }
+
+    // true when the walk phase passed 'x' between the last frame and this one (phase wraps at 2 pi)
+    static bool PhaseCrossed(float a, float b, float x)
+    {
+        if (b >= a) return a < x && b >= x;
+        return a < x || b >= x;
+    }
+
+    // each Audio Source gets a low pass filter (off while the sound is clear) and remembers its normal volume
+    void SetupMuffle(AudioSource s)
+    {
+        if (s == null) return;
+        for (int i = 0; i < muffles.Count; i++)
+            if (muffles[i].src == s) return;                     // same source dragged into two fields
+
+        SoundMuffle m = new SoundMuffle();
+        m.src = s;
+        m.baseVolume = s.volume;
+        m.basePitch = s.pitch;
+        m.lowPass = s.GetComponent<AudioLowPassFilter>();
+        if (m.lowPass == null) m.lowPass = s.gameObject.AddComponent<AudioLowPassFilter>();
+        m.lowPass.cutoffFrequency = 22000f;
+        m.lowPass.enabled = false;
+        muffles.Add(m);
+    }
+
+    // wall between droid and player = quieter + muffled, faded in and out smoothly
+    void UpdateSoundMuffle(float dt, bool snap = false)
+    {
+        if (!muffleThroughWalls || muffles.Count == 0) return;
+
+        wallCheckTimer -= dt;
+        if (snap || wallCheckTimer <= 0f)
+        {
+            wallCheckTimer = 0.1f;                               // 10 checks per second is plenty
+            wallBlocked = IsSoundBlocked();
+        }
+
+        // snap = no fade, jump straight to clear / muffled (used at the moment of death, the Update loop stops after that)
+        if (snap) muffleBlend = wallBlocked ? 1f : 0f;
+        else muffleBlend = Mathf.MoveTowards(muffleBlend, wallBlocked ? 1f : 0f, dt / muffleFadeTime);
+        float cutoff = Mathf.Exp(Mathf.Lerp(Mathf.Log(22000f), Mathf.Log(muffledCutoff), muffleBlend));   // fades evenly to the ear
+        float vol = Mathf.Lerp(1f, muffledVolume, muffleBlend);
+        for (int i = 0; i < muffles.Count; i++)
+        {
+            SoundMuffle m = muffles[i];
+            if (m.src == null || m.lowPass == null) continue;
+            m.src.volume = m.baseVolume * vol;
+            m.lowPass.enabled = muffleBlend > 0.001f;
+            m.lowPass.cutoffFrequency = cutoff;
+        }
+    }
+
+    // line from the droid's head to the player's ears (the main camera). Anything solid in between that is not the droid, the player
+    // or another droid counts as a wall.
+    bool IsSoundBlocked()
+    {
+        UnityEngine.Camera cam = UnityEngine.Camera.main;   // full name on purpose: a script called "Camera" in the project would hide Unity's Camera
+        Transform ear = cam != null ? cam.transform : (gm != null ? gm.Player : null);
+        if (ear == null) return false;
+
+        Vector3 from = EyePosition;
+        Vector3 d = ear.position - from;
+        float dist = d.magnitude;
+        if (dist < 0.1f) return false;
+
+        int n = Physics.RaycastNonAlloc(from, d / dist, wallHits, dist, wallMask, QueryTriggerInteraction.Ignore);
+        Transform player = gm != null ? gm.Player : null;
+        for (int i = 0; i < n; i++)
+        {
+            Transform h = wallHits[i].collider.transform;
+            if (h.IsChildOf(transform)) continue;                            // this droid
+            if (player != null && h.IsChildOf(player)) continue;             // the player
+            if (h.GetComponentInParent<IG88Controller>() != null) continue;  // other droids
+            return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ procedural animation
@@ -642,7 +880,18 @@ public class IG88Controller : MonoBehaviour
         walkWeight = Mathf.MoveTowards(walkWeight, walking ? 1f : 0f, dt / 0.3f);
         if (walkWeight > 0f)
         {
-            phase = Mathf.Repeat(phase + stepsPerSecond * 2f * Mathf.PI * dt, 2f * Mathf.PI);
+            // only advance the walk cycle + play footsteps while actually walking
+            // (stops residual phase crossings from firing footsteps while standing still during the fade-out)
+            if (walking)
+            {
+                float phaseBefore = phase;
+                phase = Mathf.Repeat(phase + stepsPerSecond * 2f * Mathf.PI * dt, 2f * Mathf.PI);
+
+                // a foot lands when the leg is fully forward and starts to swing back: phase = 90 degrees (left) and 270 degrees (right)
+                if (walkWeight >= 0.5f && footstepSound != null &&
+                    (PhaseCrossed(phaseBefore, phase, HalfPi) || PhaseCrossed(phaseBefore, phase, HalfPi * 3f)))
+                    PlaySound(footstepSound, DroidSound.Step, true);
+            }
             ApplyWalk(walkWeight);
         }
 

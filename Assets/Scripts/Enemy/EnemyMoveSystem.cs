@@ -65,9 +65,11 @@ internal sealed class EnemyMoveSystem
     static readonly int[] GreenNodes = { G1, G2, G3, G4, G5, G6 };
     static readonly int[] RedNodes = { R1, R2, R3, R4, R5, G3 };
 
-    // Waypoints where droids may NOT spawn or patrol (chase-only). Empty now: droids spawn and patrol on
-    // G1 and R1 like on every other waypoint. To block a waypoint again, list it here, for example { G1, R1 }.
-    static readonly int[] NoPatrolNodes = { };
+    // Waypoints where droids may NOT spawn or patrol (chase-only): G3, G4 and R3, the waypoints of the middle rooms.
+    // Every connection into the middle touches one of them (G2-G3, G3-R4, G3-G4, G4-G5, G3-R3, R3-R2), so blocking these three
+    // keeps patrolling droids on the outer ring: G1, G2, G5, G6, R5, R4, R2, R1. Droids still walk to and through them when they
+    // CHASE the player (chase and return-to-patrol use all connections). To block another waypoint, add it to the list.
+    static readonly int[] NoPatrolNodes = { G3, G4, R3 };
 
     static Transform[] nodes;
     static List<IG88Link>[] links;
