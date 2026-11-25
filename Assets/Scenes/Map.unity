@@ -32959,7 +32959,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::MissionUI
   terminal: {fileID: 1538068997}
   font: {fileID: 12800000, guid: 8200c44b654040641bf7538b9f1a1ef7, type: 3}
-  timerPosition: {x: 0, y: -150}
+  timerPosition: {x: 0, y: -160}
   objectivePosition: {x: 100, y: -180}
   promptPosition: {x: 0, y: -100}
   uploadPosition: {x: 0, y: -200}
