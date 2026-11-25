@@ -785,6 +785,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: db377ee4e99e34204a97e0044f51d812, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Doors
+  doorType: 2
   leftDoor: {fileID: 761976820}
   rightDoor: {fileID: 1665322302}
   duration: 1
@@ -2989,6 +2990,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: db377ee4e99e34204a97e0044f51d812, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Doors
+  doorType: 1
   leftDoor: {fileID: 1382649086}
   rightDoor: {fileID: 1780194485}
   duration: 1
@@ -3216,6 +3218,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: db377ee4e99e34204a97e0044f51d812, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Doors
+  doorType: 2
   leftDoor: {fileID: 761976820}
   rightDoor: {fileID: 1665322302}
   duration: 1
@@ -18027,6 +18030,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: -1530997654230624581, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       insertIndex: -1
       addedObject: {fileID: 195588105}
+    - targetCorrespondingSourceObject: {fileID: -9171667477537679572, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1538068997}
     - targetCorrespondingSourceObject: {fileID: 8810627719357723495, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       insertIndex: -1
       addedObject: {fileID: 1057623971}
@@ -19473,6 +19479,9 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 377038254}
     m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 4539203496761298751, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1297054615}
     - targetCorrespondingSourceObject: {fileID: 534964209398445480, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
       insertIndex: -1
       addedObject: {fileID: 617858773}
@@ -20905,6 +20914,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: db377ee4e99e34204a97e0044f51d812, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Doors
+  doorType: 1
   leftDoor: {fileID: 1382649086}
   rightDoor: {fileID: 1780194485}
   duration: 1
@@ -21130,6 +21140,11 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 967545457}
   m_CullTransparentMesh: 1
+--- !u!1 &974109278 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 4539203496761298751, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
+  m_PrefabInstance: {fileID: 752792749}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &981076353 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: d624a265b4e17504db0ac499fe3ca21a, type: 3}
@@ -32919,7 +32934,7 @@ MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 9063521800830333542, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
   m_PrefabInstance: {fileID: 752792749}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
+  m_GameObject: {fileID: 974109278}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 92eb3aefbc4cc3816fede8baf115a63e, type: 3}
@@ -32930,6 +32945,37 @@ RectTransform:
   m_CorrespondingSourceObject: {fileID: 4590755679799005942, guid: d9621dabb91294e279bf26e9e0e6c0c8, type: 3}
   m_PrefabInstance: {fileID: 752792749}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &1297054615
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 974109278}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a51e85b3f12e76a47834b33d05e42bf3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MissionUI
+  terminal: {fileID: 1538068997}
+  font: {fileID: 12800000, guid: 8200c44b654040641bf7538b9f1a1ef7, type: 3}
+  timerPosition: {x: 0, y: -150}
+  objectivePosition: {x: 100, y: -180}
+  promptPosition: {x: 0, y: -100}
+  uploadPosition: {x: 0, y: -200}
+  accentColor: {r: 0.45, g: 0.85, b: 0.95, a: 1}
+  warningColor: {r: 1, g: 0.7, b: 0.2, a: 1}
+  textColor: {r: 0.84, g: 0.93, b: 0.96, a: 1}
+  opacity: 1
+  timerFontSize: 32
+  objectiveFontSize: 24
+  promptFontSize: 48
+  uploadFontSize: 22
+  barSize: {x: 420, y: 18}
+  stripeCount: 32
+  stripeAngle: 20
+  disableOnCompletion: []
+  pauseOnCompletion: 1
 --- !u!1 &1302641066
 GameObject:
   m_ObjectHideFlags: 0
@@ -44861,6 +44907,32 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1006280080}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1538068996 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: -9171667477537679572, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+  m_PrefabInstance: {fileID: 679263343}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &1538068997
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1538068996}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3118af4f6f369dd44b7346c58bfbe980, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VirusTerminal
+  player: {fileID: 7427346025848275316}
+  interactionRadius: 3
+  uploadRadius: 5
+  uploadDuration: 30
+  interactionKey: 19
+  uploadStarted: 0
+  uploadCompleted: 0
+  playerInRange: 0
+  uploadProgress: 0
 --- !u!1 &1552275595 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: -7015105103574601812, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
@@ -45050,6 +45122,7 @@ GameObject:
   - component: {fileID: 1616846167}
   - component: {fileID: 1616846169}
   - component: {fileID: 1616846170}
+  - component: {fileID: 1616846171}
   m_Layer: 0
   m_Name: GAME MANAGER
   m_TagString: Untagged
@@ -45360,6 +45433,20 @@ AudioLowPassFilter:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+--- !u!114 &1616846171
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1616846164}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5369cd0d7c10f364d9366f04b7c227a5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MissionManager
+  state: 0
+  elapsedTime: 0
 --- !u!1001 &1627422402
 PrefabInstance:
   m_ObjectHideFlags: 0
