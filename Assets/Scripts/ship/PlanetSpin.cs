@@ -2,10 +2,13 @@ using UnityEngine;
 
 public class PlanetSpin : MonoBehaviour
 {
-    public float speed = 10f; // degrees per second
+    [Header("Rotation Speed (degrees per second)")]
+    public float speedX = 0f;
+    public float speedY = 10f;
+    public float speedZ = 0f;
 
     void Update()
     {
-        transform.Rotate(0f, -speed * Time.deltaTime, 0f);
+        transform.Rotate(speedX * Time.deltaTime, speedY * Time.deltaTime, speedZ * Time.deltaTime, Space.Self);
     }
 }

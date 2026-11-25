@@ -128,7 +128,7 @@ Material:
     - _WorkflowMode: 1
     - _XRMotionVectorsPass: 1
     - _ZWrite: 1
-    - _temp: 45
+    - _temp: 33
     - _texture_size: 0
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
