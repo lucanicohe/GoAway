@@ -118,6 +118,32 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
     [Tooltip("Seconds to fade between clear and muffled.")]
     [Range(0.01f, 1f)] public float muffleFadeTime = 0.15f;
 
+    [Header("Malfunction (starts the moment the virus upload is complete)")]
+    [Tooltip("Error sound. Loops for as long as the droid malfunctions. Drag a 3D Audio Source of this prefab in here (with your error clip on it). It is muffled through walls like the other sounds.")]
+    public AudioSource errorSound;
+    [Tooltip("The glow and the light jump between red and green. Seconds between two jumps = a random time between these two values.")]
+    [Range(0.05f, 2f)] public float glowSwitchMin = 0.15f;
+    [Range(0.05f, 2f)] public float glowSwitchMax = 0.6f;
+    [Tooltip("The glow blinks. Seconds it stays ON = a random time between these two values.")]
+    [Range(0.02f, 1f)] public float blinkOnMin = 0.12f;
+    [Range(0.02f, 1f)] public float blinkOnMax = 0.5f;
+    [Tooltip("Seconds it stays OFF = a random time between these two values.")]
+    [Range(0.02f, 1f)] public float blinkOffMin = 0.04f;
+    [Range(0.02f, 1f)] public float blinkOffMax = 0.2f;
+    [Tooltip("How bright the glow is while it is blinked off (0 = fully dark, 1 = no blinking).")]
+    [Range(0f, 1f)] public float blinkDimLevel = 0.03f;
+    [Tooltip("Seconds between two random shots = a random time between these two values.")]
+    [Min(0.05f)] public float randomShotMin = 0.4f;
+    [Min(0.05f)] public float randomShotMax = 1.8f;
+    [Tooltip("How often the gun arm picks a new random direction (seconds, random between these two values).")]
+    [Min(0.1f)] public float aimChangeMin = 0.5f;
+    [Min(0.1f)] public float aimChangeMax = 1.4f;
+    [Tooltip("0 = total chaos: the droid shoots wherever its gun happens to point, the player included (its bolts hurt like normal bolts). " +
+             "Above 0: a shot is held back while the gun points within this many degrees of the player, which makes the stray fire safer.")]
+    [Range(0f, 90f)] public float skipPlayerAngle = 0f;
+    [Tooltip("Also say the normal fire voice line when it shoots. Off = only the error sound.")]
+    public bool malfunctionFireLine = false;
+
     // ------------------------------------------------------------------ rig
 
     class RigBone
@@ -144,6 +170,12 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
     EnemyMoveSystem move;   // waypoint movement + detection of this droid (created in Init)
     bool ready;
     bool wasChasing;        // to notice the moment a chase starts / ends
+
+    // malfunction (virus upload complete)
+    bool malfunctioning, wasMalfunctioning;
+    bool malfRed, malfLit = true;
+    float malfColorTimer, malfBlinkTimer, nextMalfAimTime, nextMalfShotTime;
+    Vector3 malfAimDir = Vector3.forward;
     bool silentGuard;       // stationary sentries do not play the repeating patrol voice line
 
     float nextFireTime;
@@ -232,6 +264,8 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
         health = gm.DroidHealth;
         alertBlend = 0f;
         wasChasing = false;
+        malfunctioning = false;
+        wasMalfunctioning = false;
         patrolNextTime = Time.realtimeSinceStartup + patrolSoundGap;   // first patrol line comes one gap after the spawn
         fireNextTime = 0f;                                             // the first shot may say the fire line right away
         PrepareSound(patrolSound);
@@ -239,11 +273,13 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
         PrepareSound(fireSound);
         PrepareSound(footstepSound);
         PrepareSound(deathSound);
+        PrepareSound(errorSound);
         SetupMuffle(patrolSound);
         SetupMuffle(detectSound);
         SetupMuffle(fireSound);
         SetupMuffle(footstepSound);
         SetupMuffle(deathSound);
+        SetupMuffle(errorSound);
         wallBlocked = false;
         muffleBlend = 0f;
         wallCheckTimer = 0f;
@@ -404,10 +440,14 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
         alertBlend = (dt <= 0f) ? goal : Mathf.MoveTowards(alertBlend, goal, dt / LookFadeTime);
         Color state = Color.Lerp(gm.DroidGreen, gm.DroidRed, alertBlend);
 
+        // malfunction: the colour jumps between red and green and the glow blinks (glow = 1 lit, blinkDimLevel dark)
+        float glow = 1f;
+        if (malfunctioning) state = MalfunctionLook(dt, out glow);
+
         if (chaseLight != null)
         {
             chaseLight.enabled = true;
-            chaseLight.intensity = gm.DroidLightIntensity;
+            chaseLight.intensity = gm.DroidLightIntensity * glow;
             chaseLight.color = state;
         }
 
@@ -416,11 +456,11 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
             GlowMat g = glowMats[i];
             if (g.m == null) continue;
             float ei = g.emisIntensity;
-            g.m.SetColor(g.emisColorId, new Color(state.r * ei, state.g * ei, state.b * ei, 1f));
+            g.m.SetColor(g.emisColorId, new Color(state.r * ei * glow, state.g * ei * glow, state.b * ei * glow, 1f));
             if (g.baseColorId >= 0)
             {
                 float bb = g.baseBrightness;
-                g.m.SetColor(g.baseColorId, new Color(state.r * bb, state.g * bb, state.b * bb, g.baseAlpha));
+                g.m.SetColor(g.baseColorId, new Color(state.r * bb * glow, state.g * bb * glow, state.b * bb * glow, g.baseAlpha));
             }
             g.m.EnableKeyword("_EMISSION");   // Unity: the keyword must be enabled AFTER the colour is set
         }
@@ -520,6 +560,7 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
         if (patrolSound != null) patrolSound.Stop();
         if (detectSound != null) detectSound.Stop();
         if (footstepSound != null) footstepSound.Stop();        // also cancels a step that was still waiting to start
+        if (errorSound != null) errorSound.Stop();              // a dead droid stops malfunctioning noisily
         UpdateSoundMuffle(0f, true);                            // wall between droid and player right now? the death sound follows it
         PlaySound(deathSound, DroidSound.Death, true);
         if (chaseLight != null) chaseLight.enabled = false;     // a dead droid doesn't glow
@@ -699,6 +740,16 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
             }
         }
 
+        // virus upload complete: the droid malfunctions (Droid Patrol Off still wins: then it stands completely still and does nothing).
+        // The GameManager's Droid Off is on by then, so the EnemyMoveSystem never detects / chases the player: the droid keeps patrolling.
+        malfunctioning = MissionManager.EnemiesMalfunctioning && !gm.DroidPatrolOff;
+        if (malfunctioning != wasMalfunctioning)
+        {
+            wasMalfunctioning = malfunctioning;
+            if (malfunctioning) BeginMalfunction();
+            else EndMalfunction();
+        }
+
         // Nonessential audio muffle raycasts suspended when far away (>50m)
         if (chasing || distanceBand < 2)
         {
@@ -708,11 +759,12 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
 
         Transform p = gm.Player;
         if (chasing && p != null) target = p;        // target = object tagged Player, found automatically
-        if (p != null) aimPoint = gm.PlayerAimPoint;
+        if (malfunctioning) UpdateMalfunction();     // random glitch aim + random shots (not aimed at the player, but they can hit him) instead of aiming at him
+        else if (p != null) aimPoint = gm.PlayerAimPoint;
 
         // Shooting does NOT depend on the CullingGroup (UpdateFiring only does something while the droid chases and sees the player).
         // A wrong / late distance band used to switch the shooting, and with it the fire sound, off for good.
-        if (!gm.DroidPatrolOff) UpdateFiring();
+        if (!malfunctioning && !gm.DroidPatrolOff) UpdateFiring();
 
         stepsPerSecond = gm.WalkSteps;
 
@@ -722,6 +774,121 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
         {
             UpdateLook(dt);
         }
+    }
+
+    // ------------------------------------------------------------------ malfunction (after the virus upload)
+
+    void BeginMalfunction()
+    {
+        // the normal voice lines stop for good, the looping error sound takes over
+        if (patrolSound != null) patrolSound.Stop();
+        if (detectSound != null) detectSound.Stop();
+        if (errorSound != null && errorSound.clip != null)
+        {
+            errorSound.playOnAwake = false;
+            errorSound.loop = true;
+            errorSound.Play();
+            errorSound.time = Random.Range(0f, errorSound.clip.length * 0.9f);   // every droid starts at another spot, so the copies don't phase
+        }
+
+        malfRed = Random.value < 0.5f;
+        malfLit = true;
+        malfColorTimer = 0f;
+        malfBlinkTimer = Random.Range(blinkOnMin, Mathf.Max(blinkOnMin, blinkOnMax));
+        nextMalfAimTime = 0f;
+        nextMalfShotTime = Time.time + Random.Range(0.2f, 1f);
+    }
+
+    // only happens when Droid Patrol Off is switched on while playing
+    void EndMalfunction()
+    {
+        if (errorSound != null) errorSound.Stop();
+        aimAtTarget = move != null && move.Chasing;
+    }
+
+    // glitchy glow: the colour jumps between red and green at random moments and the glow blinks off and on at random moments
+    Color MalfunctionLook(float dt, out float glow)
+    {
+        malfColorTimer -= dt;
+        if (malfColorTimer <= 0f)
+        {
+            malfRed = !malfRed;
+            malfColorTimer = Random.Range(glowSwitchMin, Mathf.Max(glowSwitchMin, glowSwitchMax));
+        }
+
+        malfBlinkTimer -= dt;
+        if (malfBlinkTimer <= 0f)
+        {
+            malfLit = !malfLit;
+            malfBlinkTimer = malfLit
+                ? Random.Range(blinkOnMin, Mathf.Max(blinkOnMin, blinkOnMax))
+                : Random.Range(blinkOffMin, Mathf.Max(blinkOffMin, blinkOffMax));
+        }
+
+        glow = malfLit ? 1f : blinkDimLevel;
+        return malfRed ? gm.DroidRed : gm.DroidGreen;
+    }
+
+    // Random glitch shooting. The droid ignores the player: waist, chest, head and gun arm swing onto random directions (the same
+    // aiming code as a chase, only with a random point instead of the player) and a bolt leaves the gun every now and then, along
+    // wherever the gun really points. Its bolts are normal bolts: they hurt the player if they happen to hit him (Skip Player Angle can hold shots back near him).
+    void UpdateMalfunction()
+    {
+        // far away and out of sight: nobody sees or hears the shooting, so no aiming and no shooting (glow and error sound keep going)
+        if (!HasGun || (!isVisibleToCamera && distanceBand >= 2))
+        {
+            aimAtTarget = false;
+            return;
+        }
+
+        if (target == null) target = gm.Player != null ? gm.Player : transform;   // ApplyAim only needs a target to exist, the point comes from aimPoint
+        aimAtTarget = true;
+
+        Vector3 anchor = transform.position + transform.up * 1.3f;
+        if (Time.time >= nextMalfAimTime)
+        {
+            nextMalfAimTime = Time.time + Random.Range(aimChangeMin, Mathf.Max(aimChangeMin, aimChangeMax));
+            malfAimDir = RandomAimDirection(anchor);
+        }
+        aimPoint = anchor + malfAimDir * 8f;
+
+        if (Time.time < nextMalfShotTime) return;
+
+        Vector3 origin = gunTip.t.position;
+        Vector3 gunDir = gun.t.TransformDirection(gunFwdLocal);
+        if (PointsAtPlayer(origin, gunDir))
+        {
+            nextMalfShotTime = Time.time + 0.15f;   // Skip Player Angle is on and the gun points at the player: shoot a moment later
+            return;
+        }
+
+        nextMalfShotTime = Time.time + Random.Range(randomShotMin, Mathf.Max(randomShotMin, randomShotMax));
+        if (malfunctionFireLine) SayFireLine();
+        gm.FireDroidBolt(origin, gunDir);
+    }
+
+    Vector3 RandomAimDirection(Vector3 anchor)
+    {
+        Vector3 up = transform.up;
+        Vector3 fwd = RestForward;
+        Vector3 dir = fwd;
+        for (int i = 0; i < 8; i++)
+        {
+            float yaw = Random.Range(-180f, 180f);
+            float pitch = Random.Range(-15f, 35f) * Mathf.Deg2Rad;
+            Vector3 h = Quaternion.AngleAxis(yaw, up) * fwd;
+            dir = (h * Mathf.Cos(pitch) + up * Mathf.Sin(pitch)).normalized;
+            if (!PointsAtPlayer(anchor, dir)) break;
+        }
+        return dir;
+    }
+
+    bool PointsAtPlayer(Vector3 origin, Vector3 dir)
+    {
+        if (skipPlayerAngle <= 0f || gm.Player == null) return false;
+        Vector3 toPlayer = gm.PlayerAimPoint - origin;
+        if (toPlayer.sqrMagnitude < 0.01f) return false;
+        return Vector3.Angle(dir, toPlayer) < skipPlayerAngle;
     }
 
     // ------------------------------------------------------------------ shooting (same idea as the player's blaster, red)
@@ -778,6 +945,11 @@ public class IG88Controller : MonoBehaviour, EnemyCullingManager.ICullableTarget
     void UpdatePatrolSound(bool chasing)
     {
         if (patrolSound == null) return;
+        if (malfunctioning)                                  // the error sound takes over: no more patrol voice line
+        {
+            if (patrolSound.isPlaying) patrolSound.Stop();
+            return;
+        }
         float now = Time.realtimeSinceStartup;
         if (silentGuard)
         {

@@ -761,6 +761,10 @@ MonoBehaviour:
   walkSource: {fileID: 8272516439021536353}
   fireSource: {fileID: 2510480313654318385}
   destructionSource: {fileID: 3743160400457568200}
+  normalMaterial: {fileID: 2100000, guid: cc7f5407fd9094e4386ce1ebc38d0b40, type: 2}
+  malfunctionShotMin: 1.5
+  malfunctionShotMax: 4
+  skipPlayerAngle: 0
   muffleThroughWalls: 1
   wallMask:
     serializedVersion: 2

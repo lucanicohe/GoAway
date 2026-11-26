@@ -1,4 +1,3 @@
-
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
@@ -12,61 +11,72 @@ public class MissionUI : MonoBehaviour
 {
     [Header("References")]
     public VirusTerminal terminal;
+    [Tooltip("Only used for the results screen.")]
     public Font font;
 
-    [Header("Positions")]
-    public Vector2 timerPosition = new Vector2(0, -150);
-    public Vector2 objectivePosition = new Vector2(100, -180);
-    public Vector2 promptPosition = new Vector2(0, -100);
-    public Vector2 uploadPosition = new Vector2(0, -200);
+    [Header("My UI elements (drag them in from the Hierarchy)")]
+    public Text stageText;
+    [Tooltip("The object that holds the bar's Back and Fill.")]
+    public GameObject progressBar;
+    [Tooltip("The Fill image of the bar.")]
+    public Image progressFill;
+    public Text progressText;
+    public Text interactText;
+    public Text timerText;
 
-    [Header("Appearance")]
+    [Header("Texts")]
+    public string interactString = "「 E 」ウイルスをアップロードする";
+    public string waitingToStartText = "スタートドアを開ける";
+    public string reachTerminalText = "ターミナルを探す";
+    public string uploadingText = "アップロード中";
+    public string uploadPausedText = "一時停止中。ターミナルに戻る";
+    public string uploadCompleteText = "アップロード完了";
+    public string reachExtractionText = "出口のロック解除。脱出地点へ向かう";
+
+    [Header("Upload paused look (the player left the upload zone)")]
+    [Tooltip("Colour of the stage text and of the progress bar fill while the upload is paused. Default = red at half saturation. " +
+             "The alpha of the normal colours is kept, and everything goes back to the normal colours when the upload resumes.")]
+    public Color pausedColor = new Color(1f, 0.5f, 0.5f, 1f);
+
+    [Header("Timing")]
+    [Tooltip("Seconds 'upload complete' and the full bar stay on screen before the next stage.")]
+    public float uploadCompleteDelay = 3f;
+    [Tooltip("Only used when Show Results Screen is ticked: seconds between reaching the last room and the results screen.")]
+    public float resultsDelay = 3f;
+
+    [Header("Results screen")]
+    [Tooltip("Off = after the last room you only see the timer and the visor. On = the results screen covers everything after Results Delay seconds.")]
+    public bool showResultsScreen = false;
     public Color accentColor = new Color(0.45f, 0.85f, 0.95f);
-    public Color warningColor = new Color(1f, 0.7f, 0.2f);
     public Color textColor = new Color(0.84f, 0.93f, 0.96f);
 
-    [Range(0f, 1f)]
-    public float opacity = 1f;
-
-    public int timerFontSize = 32;
-    public int objectiveFontSize = 24;
-    public int promptFontSize = 24;
-    public int uploadFontSize = 22;
-
-    [Header("Upload Bar")]
-    public Vector2 barSize = new Vector2(420, 18);
-    public int stripeCount = 32;
-    public float stripeAngle = 20f;
-
     [Header("Mission Completion")]
+    [Tooltip("Drag the player's movement, look and weapon scripts here. They are switched off when the last room is reached.")]
     public Behaviour[] disableOnCompletion;
+    [Tooltip("Freezes the whole game (Time.timeScale 0) when the last room is reached.")]
     public bool pauseOnCompletion = true;
 
     private VisorHud visor;
     private RectTransform root;
-    private CanvasGroup missionGroup;
-
-    private Text timerText;
-    private Text objectiveText;
-    private Text promptText;
-
-    private RectTransform uploadPanel;
-    private Text uploadTitle;
-    private Text uploadDescription;
-    private Text uploadPercent;
-
-    private Image uploadFill;
-    private VisorHudBarWipe uploadWipe;
+    private VisorHudBarWipe progressWipe;
 
     private RectTransform endPanel;
     private Text finalTimeText;
     private Text bestTimeText;
 
-    private bool resultsShown;
-    private float previousTimeScale = 1f;
+    private MissionManager.MissionState lastState;
+    private float uploadCompleteUntil;
+    private float completedAt = -1f;
+    private int lastPercent = -1;
 
-    private Texture2D stripeTexture;
-    private Sprite stripeSprite;
+    // the colours the two elements have in the Inspector: the paused look goes back to them
+    private Color stageNormalColor = Color.white;
+    private Color fillNormalColor = Color.white;
+    private bool pausedStyleOn;
+
+    private bool resultsShown;
+    private bool frozen;
+    private float previousTimeScale = 1f;
 
     private string BestTimeKey =>
         "MissionBest_" + SceneManager.GetActiveScene().name;
@@ -90,6 +100,36 @@ public class MissionUI : MonoBehaviour
         textColor = visor.labelColor;
 
         BuildUI();
+
+        // remember the normal colours (the paused look returns to them)
+        if (stageText != null)
+            stageNormalColor = stageText.color;
+
+        if (progressFill != null)
+            fillNormalColor = progressFill.color;
+
+        // the bar is cut off by the same effect the health and ammo bars use
+        if (progressFill != null)
+        {
+            progressFill.type = Image.Type.Simple;
+
+            progressWipe =
+                progressFill.GetComponent<VisorHudBarWipe>();
+
+            if (progressWipe == null)
+                progressWipe = progressFill.gameObject
+                    .AddComponent<VisorHudBarWipe>();
+
+            progressWipe.Set(0f, Vector2.left);
+        }
+
+        SetText(interactText, interactString);
+
+        // hidden until needed: timer, interact prompt, upload bar and percentage
+        SetShown(timerText, false);
+        SetShown(interactText, false);
+        SetShown(progressBar, false);
+        SetShown(progressText, false);
     }
 
     void LateUpdate()
@@ -99,111 +139,168 @@ public class MissionUI : MonoBehaviour
         if (mission == null || root == null)
             return;
 
-        ApplyLayout();
-
-        timerText.text = mission.GetFormattedTime();
-
-        UpdateObjective(mission.State);
-        UpdateTerminal();
-
-        if (mission.State ==
-            MissionManager.MissionState.Completed)
+        if (resultsShown)
         {
-            if (!resultsShown)
-                ShowResults();
-
             if (Keyboard.current != null &&
                 Keyboard.current.rKey.wasPressedThisFrame)
             {
                 RetryMission();
             }
+
+            return;
         }
+
+        MissionManager.MissionState state = mission.State;
+
+        if (state == MissionManager.MissionState.Completed)
+        {
+            // last room: the timer shows the final time and everything except the visor is hidden
+            if (completedAt < 0f)
+            {
+                completedAt = Time.unscaledTime;
+
+                SetText(timerText, mission.GetFormattedTime());
+                SetShown(timerText, true);
+
+                SetShown(stageText, false);
+                SetShown(interactText, false);
+                SetShown(progressBar, false);
+                SetShown(progressText, false);
+
+                FreezeGame();
+            }
+
+            // the game is frozen here, so the delay has to run on real time
+            if (showResultsScreen &&
+                Time.unscaledTime - completedAt >= resultsDelay)
+                ShowResults();
+
+            return;
+        }
+
+        // upload just finished: keep "upload complete" and the full bar for a moment
+        if (lastState == MissionManager.MissionState.Uploading &&
+            state == MissionManager.MissionState.ReachExtraction)
+        {
+            uploadCompleteUntil = Time.time + uploadCompleteDelay;
+        }
+
+        lastState = state;
+
+        UpdateStage(state);
+        UpdatePausedStyle(state);
+        UpdateUpload(state);
+        UpdateInteract();
     }
 
-    void UpdateObjective(MissionManager.MissionState state)
+    bool UploadCompleteVisible(MissionManager.MissionState state)
     {
+        return state == MissionManager.MissionState.ReachExtraction &&
+               Time.time < uploadCompleteUntil;
+    }
+
+    void UpdateStage(MissionManager.MissionState state)
+    {
+        string text;
+
         switch (state)
         {
             case MissionManager.MissionState.WaitingToStart:
-                objectiveText.text =
-                    "OPEN THE STARTING DOOR";
+                text = waitingToStartText;
                 break;
 
             case MissionManager.MissionState.ReachTerminal:
-                objectiveText.text =
-                    "LOCATE THE TERMINAL";
+                text = reachTerminalText;
                 break;
 
             case MissionManager.MissionState.Uploading:
-                objectiveText.text =
-                    "UPLOAD VIRUS TO TERMINAL";
+                text = terminal != null && terminal.IsPaused
+                    ? uploadPausedText
+                    : uploadingText;
                 break;
 
-            case MissionManager.MissionState.ReachExtraction:
-                objectiveText.text =
-                    "EXIT UNLOCKED\nPROCEED TO EXTRACTION";
+            default: // ReachExtraction
+                text = UploadCompleteVisible(state)
+                    ? uploadCompleteText
+                    : reachExtractionText;
                 break;
+        }
 
-            case MissionManager.MissionState.Completed:
-                objectiveText.text =
-                    "MISSION COMPLETE";
-                break;
+        SetText(stageText, text);
+    }
+
+    // upload paused (the player walked out of the upload zone): the stage text and the bar fill turn half-saturated red.
+    // Only touches the colours when the paused state changes.
+    void UpdatePausedStyle(MissionManager.MissionState state)
+    {
+        bool paused =
+            state == MissionManager.MissionState.Uploading &&
+            terminal != null &&
+            terminal.IsPaused;
+
+        if (paused == pausedStyleOn)
+            return;
+
+        pausedStyleOn = paused;
+
+        if (stageText != null)
+            stageText.color = paused
+                ? WithAlpha(pausedColor, stageNormalColor.a)
+                : stageNormalColor;
+
+        if (progressFill != null)
+            progressFill.color = paused
+                ? WithAlpha(pausedColor, fillNormalColor.a)
+                : fillNormalColor;
+    }
+
+    static Color WithAlpha(Color c, float alpha)
+    {
+        c.a = alpha;
+        return c;
+    }
+
+    void UpdateUpload(MissionManager.MissionState state)
+    {
+        bool show =
+            state == MissionManager.MissionState.Uploading ||
+            UploadCompleteVisible(state);
+
+        SetShown(progressBar, show);
+        SetShown(progressText, show);
+
+        if (!show)
+            return;
+
+        float progress = terminal != null
+            ? terminal.UploadProgress
+            : 0f;
+
+        if (progressWipe != null)
+            progressWipe.Set(progress, Vector2.left);
+
+        // the text is only rewritten when the number changes
+        int percent = Mathf.FloorToInt(progress * 100f);
+
+        if (percent != lastPercent)
+        {
+            lastPercent = percent;
+            SetText(progressText, percent + "%");
         }
     }
 
-    void UpdateTerminal()
+    void UpdateInteract()
     {
-        if (terminal == null || resultsShown)
-        {
-            promptText.gameObject.SetActive(false);
-            uploadPanel.gameObject.SetActive(false);
-            return;
-        }
+        bool show = terminal != null && terminal.CanInteract;
 
-        promptText.gameObject.SetActive(
-            terminal.CanInteract
-        );
+        SetShown(interactText, show);
 
-        bool showUpload =
-            terminal.UploadStarted &&
-            !terminal.UploadCompleted;
-
-        uploadPanel.gameObject.SetActive(showUpload);
-
-        if (!showUpload)
-            return;
-
-        float progress = terminal.UploadProgress;
-
-        uploadPercent.text =
-            Mathf.FloorToInt(progress * 100f) + "%";
-
-        uploadWipe.Set(progress, Vector2.left);
-
-        Color currentColor = terminal.IsPaused
-            ? warningColor
-            : accentColor;
-
-        uploadFill.color = currentColor;
-        uploadTitle.color = currentColor;
-        uploadPercent.color = currentColor;
-
-        if (terminal.IsPaused)
-        {
-            uploadTitle.text = "UPLOAD PAUSED";
-            uploadDescription.text =
-                "RETURN TO TRANSMISSION RANGE";
-        }
-        else
-        {
-            uploadTitle.text = "UPLOADING VIRUS";
-            uploadDescription.text =
-                "MAINTAIN PROXIMITY TO TERMINAL";
-        }
+        // the interact text takes the place of the crosshair
+        visor.SetCrosshairHidden(show);
     }
 
     // =========================================
-    // UI GENERATION
+    // UI GENERATION (results screen only)
     // =========================================
 
     void BuildUI()
@@ -218,196 +315,9 @@ public class MissionUI : MonoBehaviour
 
         Stretch(root);
 
-        missionGroup =
-            root.gameObject.AddComponent<CanvasGroup>();
-
-        missionGroup.blocksRaycasts = false;
-        missionGroup.interactable = false;
-
-        timerText = CreateText(
-            "Mission Timer",
-            root,
-            "00:00.00",
-            timerFontSize,
-            TextAnchor.MiddleCenter,
-            new Vector2(0.5f, 1f),
-            timerPosition,
-            new Vector2(400, 60),
-            textColor
-        );
-
-        objectiveText = CreateText(
-            "Mission Objective",
-            root,
-            "OPEN THE STARTING DOOR",
-            objectiveFontSize,
-            TextAnchor.UpperLeft,
-            new Vector2(0f, 1f),
-            objectivePosition,
-            new Vector2(600, 100),
-            textColor
-        );
-
-        objectiveText.rectTransform.pivot =
-            new Vector2(0f, 1f);
-
-        promptText = CreateText(
-            "Interaction Prompt",
-            root,
-            "[ E ]  INITIATE VIRUS UPLOAD",
-            promptFontSize,
-            TextAnchor.MiddleCenter,
-            new Vector2(0.5f, 0.5f),
-            promptPosition,
-            new Vector2(700, 60),
-            accentColor
-        );
-
-        BuildUploadPanel();
         BuildEndScreen();
 
-        promptText.gameObject.SetActive(false);
-        uploadPanel.gameObject.SetActive(false);
         endPanel.gameObject.SetActive(false);
-    }
-
-    void BuildUploadPanel()
-    {
-        uploadPanel = CreateRect(
-            "Virus Upload",
-            root,
-            new Vector2(0.5f, 0.5f),
-            uploadPosition,
-            new Vector2(600, 130)
-        );
-
-        uploadTitle = CreateText(
-            "Upload Title",
-            uploadPanel,
-            "UPLOADING VIRUS",
-            uploadFontSize,
-            TextAnchor.MiddleCenter,
-            new Vector2(0.5f, 0.5f),
-            new Vector2(0, 45),
-            new Vector2(600, 35),
-            accentColor
-        );
-
-        RectTransform barBack = CreateRect(
-            "Upload Bar Background",
-            uploadPanel,
-            new Vector2(0.5f, 0.5f),
-            Vector2.zero,
-            barSize
-        );
-
-        CreateStripeSprite();
-
-        Image background =
-            barBack.gameObject.AddComponent<Image>();
-
-        background.sprite = stripeSprite;
-        background.color =
-            new Color(0.15f, 0.3f, 0.35f, 0.45f);
-
-        background.raycastTarget = false;
-
-        RectTransform fillRect = CreateRect(
-            "Upload Bar Fill",
-            barBack,
-            new Vector2(0.5f, 0.5f),
-            Vector2.zero,
-            barSize
-        );
-
-        Stretch(fillRect);
-
-        uploadFill =
-            fillRect.gameObject.AddComponent<Image>();
-
-        uploadFill.sprite = stripeSprite;
-        uploadFill.color = accentColor;
-        uploadFill.type = Image.Type.Simple;
-        uploadFill.raycastTarget = false;
-
-        uploadWipe =
-            fillRect.gameObject.AddComponent<VisorHudBarWipe>();
-
-        uploadWipe.Set(0f, Vector2.left);
-
-        uploadPercent = CreateText(
-            "Upload Percentage",
-            uploadPanel,
-            "0%",
-            uploadFontSize,
-            TextAnchor.MiddleCenter,
-            new Vector2(0.5f, 0.5f),
-            new Vector2(0, -27),
-            new Vector2(300, 35),
-            accentColor
-        );
-
-        uploadDescription = CreateText(
-            "Upload Description",
-            uploadPanel,
-            "MAINTAIN PROXIMITY TO TERMINAL",
-            18,
-            TextAnchor.MiddleCenter,
-            new Vector2(0.5f, 0.5f),
-            new Vector2(0, -55),
-            new Vector2(700, 35),
-            textColor
-        );
-    }
-
-    void CreateStripeSprite()
-    {
-        int width = 1024;
-        int height = 64;
-
-        stripeTexture = new Texture2D(
-            width, height,
-            TextureFormat.RGBA32,
-            false
-        );
-
-        stripeTexture.filterMode = FilterMode.Bilinear;
-        stripeTexture.wrapMode = TextureWrapMode.Clamp;
-
-        Color32[] pixels = new Color32[width * height];
-
-        float period = width /
-            (float)Mathf.Max(stripeCount, 1);
-
-        float slope = Mathf.Tan(
-            stripeAngle * Mathf.Deg2Rad
-        );
-
-        for (int y = 0; y < height; y++)
-        {
-            for (int x = 0; x < width; x++)
-            {
-                float stripe = Mathf.Repeat(
-                    x + y * slope, period
-                );
-
-                byte alpha = stripe < period * 0.72f
-                    ? (byte)255
-                    : (byte)0;
-
-                pixels[y * width + x] =
-                    new Color32(255, 255, 255, alpha);
-            }
-        }
-
-        stripeTexture.SetPixels32(pixels);
-        stripeTexture.Apply();
-
-        stripeSprite = Sprite.Create(
-            stripeTexture,
-            new Rect(0, 0, width, height),
-            new Vector2(0.5f, 0.5f)
-        );
     }
 
     // =========================================
@@ -534,6 +444,23 @@ public class MissionUI : MonoBehaviour
         resultsGroup.blocksRaycasts = true;
     }
 
+    // last room: switch off the player's scripts and stop the game
+    void FreezeGame()
+    {
+        foreach (Behaviour control in disableOnCompletion)
+        {
+            if (control != null && control != this)
+                control.enabled = false;
+        }
+
+        if (pauseOnCompletion && !frozen)
+        {
+            frozen = true;
+            previousTimeScale = Time.timeScale;
+            Time.timeScale = 0f;
+        }
+    }
+
     void ShowResults()
     {
         resultsShown = true;
@@ -561,24 +488,14 @@ public class MissionUI : MonoBehaviour
             ? "NEW PERSONAL BEST"
             : "PERSONAL BEST  " + FormatTime(bestTime);
 
-        timerText.gameObject.SetActive(false);
-        objectiveText.gameObject.SetActive(false);
-        promptText.gameObject.SetActive(false);
-        uploadPanel.gameObject.SetActive(false);
+        SetShown(timerText, false);
+        SetShown(stageText, false);
+        SetShown(interactText, false);
+        SetShown(progressBar, false);
+        SetShown(progressText, false);
 
         endPanel.gameObject.SetActive(true);
         endPanel.SetAsLastSibling();
-
-        foreach (Behaviour control in disableOnCompletion)
-        {
-            if (control != null && control != this)
-                control.enabled = false;
-        }
-
-        previousTimeScale = Time.timeScale;
-
-        if (pauseOnCompletion)
-            Time.timeScale = 0f;
 
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
@@ -619,32 +536,23 @@ public class MissionUI : MonoBehaviour
     // HELPERS
     // =========================================
 
-    void ApplyLayout()
+    // both helpers do nothing if an element was not dragged in, and only touch the UI when something changes
+    static void SetText(Text text, string value)
     {
-        missionGroup.alpha = opacity;
+        if (text != null && text.text != value)
+            text.text = value;
+    }
 
-        timerText.rectTransform.anchoredPosition =
-            timerPosition;
+    static void SetShown(Component element, bool on)
+    {
+        if (element != null && element.gameObject.activeSelf != on)
+            element.gameObject.SetActive(on);
+    }
 
-        objectiveText.rectTransform.anchoredPosition =
-            objectivePosition;
-
-        promptText.rectTransform.anchoredPosition =
-            promptPosition;
-
-        uploadPanel.anchoredPosition =
-            uploadPosition;
-
-        timerText.fontSize = timerFontSize;
-        objectiveText.fontSize = objectiveFontSize;
-        promptText.fontSize = promptFontSize;
-        uploadTitle.fontSize = uploadFontSize;
-        uploadPercent.fontSize = uploadFontSize;
-
-        RectTransform barBack =
-            uploadFill.rectTransform.parent as RectTransform;
-
-        barBack.sizeDelta = barSize;
+    static void SetShown(GameObject element, bool on)
+    {
+        if (element != null && element.activeSelf != on)
+            element.SetActive(on);
     }
 
     RectTransform CreateRect(
@@ -739,16 +647,10 @@ public class MissionUI : MonoBehaviour
 
     void OnDestroy()
     {
-        if (resultsShown && pauseOnCompletion)
+        if (frozen)
             Time.timeScale = previousTimeScale;
 
         if (root != null)
             Destroy(root.gameObject);
-
-        if (stripeSprite != null)
-            Destroy(stripeSprite);
-
-        if (stripeTexture != null)
-            Destroy(stripeTexture);
     }
 }

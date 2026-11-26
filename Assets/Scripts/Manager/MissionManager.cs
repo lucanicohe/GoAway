@@ -1,4 +1,3 @@
-
 using UnityEngine;
 
 public class MissionManager : MonoBehaviour
@@ -28,6 +27,14 @@ public class MissionManager : MonoBehaviour
     public bool MissionActive =>
         state != MissionState.WaitingToStart &&
         state != MissionState.Completed;
+
+    /// <summary>
+    /// True from the moment the virus upload is complete (and for the rest of the mission).
+    /// While it is true, every IG-88 droid and every Flathead malfunctions: they no longer hunt the player, but shoot wildly (stray bolts still hurt).
+    /// Safe to read from anywhere: false when there is no MissionManager in the scene.
+    /// </summary>
+    public static bool EnemiesMalfunctioning =>
+        Instance != null && Instance.UploadCompleted;
 
     void Awake()
     {
