@@ -3,14 +3,14 @@ using UnityEngine;
 
 /// <summary>
 /// The ship goes wrong the moment the virus upload is complete:
-///  - every LIGHT you drag in starts to flicker, like a power outage or a short circuit,
+///  - every LIGHT in the scene automatically starts to flicker (Realtime / Mixed only),
 ///  - every emission MATERIAL you drag in flickers its emission intensity the same way (drag the Material assets, not renderers),
 ///  - every ALARM Audio Source you drag in starts playing (looping by default).
 /// Put this on any object in the scene (for example the one that has the MissionManager). Nothing else has to be set up:
-/// it watches the MissionManager by itself. Lists have no size limit, drag in as many as you like.
+/// it watches the MissionManager by itself.
 ///
 /// Notes:
-///  - Lights must be Realtime or Mixed, a Baked light can't change while playing.
+///  - Only Realtime and Mixed lights are affected. Baked lights are skipped automatically.
 ///  - A material asset is changed while the flicker runs and put back to its normal emission when the flicker ends,
 ///    when this script is switched off, or when you stop Play mode. (If Unity crashes in the middle of it, re-check the emission colour of those materials.)
 ///  - Every renderer in the scene that uses a dragged-in material flickers with it.
@@ -19,10 +19,6 @@ using UnityEngine;
 [AddComponentMenu("Mission/Upload Alarm Effects")]
 public class UploadAlarmEffects : MonoBehaviour
 {
-    [Header("Lights (drag in as many as you like)")]
-    [Tooltip("Every light here flickers after the upload. Their normal intensity is remembered and restored at the end.")]
-    public Light[] lights;
-
     [Header("Emission materials (drag in MATERIAL assets from the Project window, not renderers)")]
     [Tooltip("Every material here flickers its emission intensity after the upload. The material needs an emission colour that is not black (and Emission ticked on URP / Standard materials).")]
     public Material[] emissionMaterials;
@@ -46,7 +42,6 @@ public class UploadAlarmEffects : MonoBehaviour
 
     // ------------------------------------------------------------------ internals
 
-    // one flicker pattern: switches between lit and dark at random times
     class Flicker
     {
         public bool lit = true;
@@ -58,7 +53,7 @@ public class UploadAlarmEffects : MonoBehaviour
     {
         public Light light;
         public float baseIntensity;
-        public float applied = -1f;      // last factor written (the value is only written when it changes)
+        public float applied = -1f;
         public Flicker flicker = new Flicker();
     }
 
@@ -75,13 +70,12 @@ public class UploadAlarmEffects : MonoBehaviour
 
     readonly List<LightEntry> lightEntries = new List<LightEntry>();
     readonly List<MaterialEntry> materialEntries = new List<MaterialEntry>();
-    readonly Flicker shared = new Flicker();   // used when Sync All is on
+    readonly Flicker shared = new Flicker();
 
-    bool active;    // the outage is running
-    bool ended;     // the mission is complete: the outage is over for good
-    bool touched;   // lights / materials have been changed (and need to be restored)
+    bool active;
+    bool ended;
+    bool touched;
 
-    // derived from the single slider
     float onTimeMin, onTimeMax, offTimeMin, offTimeMax, litBrightnessMin, darkLevel;
 
     void OnEnable()
@@ -96,7 +90,6 @@ public class UploadAlarmEffects : MonoBehaviour
 
     void Start()
     {
-        // the alarms stay silent until the upload is complete
         if (alarms == null) return;
         for (int i = 0; i < alarms.Length; i++)
         {
@@ -124,7 +117,6 @@ public class UploadAlarmEffects : MonoBehaviour
             return;
         }
 
-        // keep the derived values fresh in case you tweak the slider at runtime
         DeriveFlickerParams();
 
         float dt = Time.deltaTime;
@@ -148,11 +140,9 @@ public class UploadAlarmEffects : MonoBehaviour
             if (Mathf.Approximately(f, e.applied)) continue;
             e.applied = f;
             Color b = e.baseColor;
-            e.material.SetColor(e.colorId, new Color(b.r * f, b.g * f, b.b * f, b.a));   // HDR strength is kept, only scaled
+            e.material.SetColor(e.colorId, new Color(b.r * f, b.g * f, b.b * f, b.a));
         }
     }
-
-    // ------------------------------------------------------------------ start / end
 
     void Begin()
     {
@@ -161,7 +151,6 @@ public class UploadAlarmEffects : MonoBehaviour
 
         DeriveFlickerParams();
 
-        // every light / material starts at another point of its pattern, so they don't all blink in step
         float spread = Mathf.Max(onTimeMin, onTimeMax);
         for (int i = 0; i < lightEntries.Count; i++) lightEntries[i].flicker.timer = Random.Range(0f, spread);
         for (int i = 0; i < materialEntries.Count; i++) materialEntries[i].flicker.timer = Random.Range(0f, spread);
@@ -198,27 +187,19 @@ public class UploadAlarmEffects : MonoBehaviour
         Restore();
     }
 
-    // ------------------------------------------------------------------ single-slider mapping
-
     void DeriveFlickerParams()
     {
-        // 0 = calm / slow   →   1 = chaotic / fast + deep
         float t = Mathf.Clamp01(flickerAmount);
 
-        // speed (smaller times = faster)
         onTimeMin  = Mathf.Lerp(0.25f, 0.03f, t);
         onTimeMax  = Mathf.Lerp(0.80f, 0.18f, t);
         offTimeMin = Mathf.Lerp(0.15f, 0.02f, t);
         offTimeMax = Mathf.Lerp(0.50f, 0.12f, t);
 
-        // intensity
-        litBrightnessMin = Mathf.Lerp(0.85f, 0.35f, t);   // how much it can drop when it comes back on
-        darkLevel        = Mathf.Lerp(0.25f, 0.02f, t);    // how dark the “off” moments get
+        litBrightnessMin = Mathf.Lerp(0.85f, 0.35f, t);
+        darkLevel        = Mathf.Lerp(0.25f, 0.02f, t);
     }
 
-    // ------------------------------------------------------------------ flicker pattern
-
-    // advances one pattern and returns the brightness factor (1 = normal)
     float Step(Flicker f, float dt)
     {
         f.timer -= dt;
@@ -238,25 +219,25 @@ public class UploadAlarmEffects : MonoBehaviour
         return f.lit ? f.level : darkLevel;
     }
 
-    // ------------------------------------------------------------------ remember / restore the normal values
-
     void Capture()
     {
         lightEntries.Clear();
         materialEntries.Clear();
 
-        if (lights != null)
+        // Auto-grab every Realtime / Mixed light in the scene (once)
+        Light[] allLights = FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (int i = 0; i < allLights.Length; i++)
         {
-            for (int i = 0; i < lights.Length; i++)
-            {
-                Light l = lights[i];
-                if (l == null || HasLight(l)) continue;   // empty slot, or the same light dragged in twice
+            Light l = allLights[i];
+            if (l == null) continue;
 
-                LightEntry e = new LightEntry();
-                e.light = l;
-                e.baseIntensity = l.intensity;
-                lightEntries.Add(e);
-            }
+            // Skip baked lights – they can't change at runtime
+            if (l.lightmapBakeType == LightmapBakeType.Baked) continue;
+
+            LightEntry e = new LightEntry();
+            e.light = l;
+            e.baseIntensity = l.intensity;
+            lightEntries.Add(e);
         }
 
         if (emissionMaterials != null)
@@ -288,7 +269,6 @@ public class UploadAlarmEffects : MonoBehaviour
         }
     }
 
-    // puts every light and material back to the value it had before the outage
     void Restore()
     {
         if (!touched) return;
@@ -309,13 +289,6 @@ public class UploadAlarmEffects : MonoBehaviour
         }
     }
 
-    bool HasLight(Light l)
-    {
-        for (int i = 0; i < lightEntries.Count; i++)
-            if (lightEntries[i].light == l) return true;
-        return false;
-    }
-
     bool HasMaterial(Material m)
     {
         for (int i = 0; i < materialEntries.Count; i++)
@@ -323,7 +296,6 @@ public class UploadAlarmEffects : MonoBehaviour
         return false;
     }
 
-    // the emission colour property: the usual names first, then any colour property with "emi" or "glow" in its name (Shader Graph)
     static int FindEmissionColorId(Material m)
     {
         for (int i = 0; i < EmissionColorNames.Length; i++)
