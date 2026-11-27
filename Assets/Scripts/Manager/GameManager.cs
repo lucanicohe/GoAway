@@ -187,7 +187,7 @@ public class GameManager : MonoBehaviour
     //  FLATHEAD ROBOTS (four-legged turrets on the walls and the ceiling)
     //  They use the same detection / aim settings as the droids above (Sight Range, Detection Radius, Lose Sight Time,
     //  Droid Accuracy, Droid Bolt Speed, Droid Off, Droid Patrol Off). Their damage and fire rate are their own (Flathead Weapon).
-    //  They are SNEAKY (see 'Flathead Stealth'): one at a time hunts the player, but any Flathead under the player's crosshair immediately
+    //  They are SNEAKY (see 'Flathead Stealth'): a configurable number hunt the player, but any Flathead under the player's crosshair immediately
     //  dodges and can fire in self-defense while moving.
     // =====================================================================
 
@@ -252,6 +252,15 @@ public class GameManager : MonoBehaviour
     [Tooltip("Flatheads never get closer than this to each other. One that would break this waits until the other one moves.")]
     [SerializeField] private float minFlatheadDistance = 0.5f;
 
+    [Header("Flathead Hunter Limits")]
+    [Tooltip("Maximum simultaneous active hunters before the upload.")]
+    [Range(1, MaxFlatheads)]
+    [SerializeField] private int maxActiveFlatheadHunters = 2;
+    [Tooltip("Maximum simultaneous active hunters during the upload phase, including when paused.")]
+    [Range(1, MaxFlatheads)]
+    [SerializeField] private int maxActiveFlatheadHuntersDuringUpload = 4;
+    [SerializeField] private int activeFlatheadHunterCount;
+
     [Header("Flathead Stealth and Evasion")]
     [Tooltip("A Flathead closer than this to the player (metres) senses him even WITHOUT a line of sight, through walls, like a mosquito smelling you. " +
              "Whenever ONE Flathead sees or senses the player, ALL Flatheads are alerted for 'Lose Sight Time' seconds and the next one comes, " +
@@ -282,7 +291,7 @@ public class GameManager : MonoBehaviour
     [Tooltip("Seconds a Flathead stays away after a finite burst. Aim evasion is brief and does not remove the active hunter.")]
     [Min(0f)]
     [SerializeField] private float flatheadRetreatTime = 12f;
-    [Tooltip("Pause (seconds) between one Flathead giving up / running / dying and the next one being sent.")]
+    [Tooltip("Pause (seconds) before a vacated hunter slot can be filled again.")]
     [Min(0f)]
     [SerializeField] private float flatheadReplaceDelay = 2f;
 
@@ -328,8 +337,8 @@ public class GameManager : MonoBehaviour
     readonly List<IG88Controller> droids = new List<IG88Controller>();
     readonly List<FlatheadEnemy> flatheads = new List<FlatheadEnemy>();
     Transform flatheadAimTarget;   // sits on the centre of the player: the Flatheads' turrets aim at it
-    FlatheadEnemy flatheadHunter;  // the ONE Flathead that is going after the player right now (the others lurk)
-    float nextFlatheadHunterTime;  // the next one is not sent before this time
+    readonly List<FlatheadEnemy> flatheadHunters = new List<FlatheadEnemy>();
+    readonly List<float> flatheadReplacementTimes = new List<float>();
     float flatheadAlertUntil;      // while Time.time is below this, ALL Flatheads know where the player is (somebody saw / sensed him recently)
     UnityEngine.Camera gazeCamera; // camera whose center-screen shot ray detects a Flathead under aim
     FlatheadEnemy aimedFlatheadThisFrame;
@@ -820,15 +829,7 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // Quick reload for testing (press R)
-    private void LateUpdate()
-    {
-        if (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
-        {
-            AmmoProperty.Value = maxAmmo;
-            Debug.Log("Reloaded!");
-        }
-    }
+
 
     // =====================================================================
     //  IG-88: waypoints (the graph itself lives in EnemyMoveSystem)
@@ -1369,7 +1370,9 @@ public class GameManager : MonoBehaviour
             }
         }
         flatheads.Clear();
-        flatheadHunter = null;
+        flatheadHunters.Clear();
+        flatheadReplacementTimes.Clear();
+        activeFlatheadHunterCount = 0;
         flatheadAlertUntil = 0f;
     }
 
@@ -1403,51 +1406,52 @@ public class GameManager : MonoBehaviour
         if (cullingManager != null) cullingManager.UnregisterEnemy(f);
         flatheads.Remove(f);
 
-        // the hunter died: a beat later the next Flathead tries its luck
-        if (flatheadHunter != null && ReferenceEquals(flatheadHunter, f))
-        {
-            flatheadHunter = null;
-            nextFlatheadHunterTime = Time.time + flatheadReplaceDelay;
-        }
+        if (flatheadHunters.Remove(f))
+            flatheadReplacementTimes.Add(Time.time + flatheadReplaceDelay);
+        activeFlatheadHunterCount = flatheadHunters.Count;
     }
 
-    // =====================================================================
-    //  FLATHEAD SNEAK ATTACK: one hunter at a time, with direct-aim self-defense
-    // =====================================================================
-
-    /// <summary>
-    /// Only ONE Flathead is assigned to hunt at a time. Any other Flathead the player directly aims at can evade and fire in self-defense
-    /// without taking over the hunter slot. When the hunter flees after a finite burst, gives up or dies, the next one is sent after
-    /// 'Flathead Replace Delay': the closest Flathead that isn't on cooldown. It does not need a line of sight to be selected.
-    /// </summary>
+    // Multiple hunter slots, with an independent replacement delay for each vacated slot.
     private void UpdateFlatheadHunter()
     {
-        if (flatheadHunter != null)
+        for (int i = flatheadHunters.Count - 1; i >= 0; i--)
         {
-            if (!flatheadHunter.IsDead && flatheadHunter.IsHunting) return;   // still at it
-            flatheadHunter = null;
-            nextFlatheadHunterTime = Time.time + flatheadReplaceDelay;        // a beat before the next one comes
-            return;
+            FlatheadEnemy f = flatheadHunters[i];
+            if (f != null && !f.IsDead && f.IsHunting) continue;
+            flatheadHunters.RemoveAt(i);
+            flatheadReplacementTimes.Add(Time.time + flatheadReplaceDelay);
         }
+        for (int i = flatheadReplacementTimes.Count - 1; i >= 0; i--)
+            if (Time.time >= flatheadReplacementTimes[i])
+                flatheadReplacementTimes.RemoveAt(i);
 
-        if (Time.time < nextFlatheadHunterTime) return;
+        activeFlatheadHunterCount = flatheadHunters.Count;
         Transform p = Player;
         if (p == null || !PlayerAlive || DroidOff || droidPatrolOff) return;
-        if (!FlatheadsAlerted) return;   // nobody has seen or sensed the player lately: they all just lurk
 
-        FlatheadEnemy best = null;
-        float bestDist = float.MaxValue;
-        for (int i = 0; i < flatheads.Count; i++)
+        MissionManager mission = MissionManager.Instance;
+        bool uploading = mission != null && mission.State == MissionManager.MissionState.Uploading;
+        if (!uploading && !FlatheadsAlerted) return;
+        if (uploading) FlatheadAlert();
+
+        int limit = Mathf.Clamp(uploading ? Mathf.Max(maxActiveFlatheadHunters, maxActiveFlatheadHuntersDuringUpload)
+                                          : maxActiveFlatheadHunters, 1, MaxFlatheads);
+        while (flatheadHunters.Count + flatheadReplacementTimes.Count < limit)
         {
-            FlatheadEnemy f = flatheads[i];
-            if (f == null || !f.CanHunt) continue;
-            float d = (f.transform.position - p.position).sqrMagnitude;
-            if (d < bestDist) { bestDist = d; best = f; }
+            FlatheadEnemy best = null;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < flatheads.Count; i++)
+            {
+                FlatheadEnemy f = flatheads[i];
+                if (f == null || f.IsDead || !f.CanHunt || flatheadHunters.Contains(f)) continue;
+                float d = (f.transform.position - p.position).sqrMagnitude;
+                if (d < bestDist) { bestDist = d; best = f; }
+            }
+            if (best == null) break;
+            flatheadHunters.Add(best);
+            best.StartHunting();
         }
-        if (best == null) return;
-
-        flatheadHunter = best;
-        best.StartHunting();
+        activeFlatheadHunterCount = flatheadHunters.Count;
     }
 
     /// <summary>True when the player's center-screen shot ray hits this Flathead. Cached so all Flatheads share one raycast per frame.</summary>
