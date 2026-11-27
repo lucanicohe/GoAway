@@ -18229,6 +18229,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: -5002050181572182288, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       insertIndex: -1
       addedObject: {fileID: 1155265177}
+    - targetCorrespondingSourceObject: {fileID: -5002050181572182288, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 821657751}
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: -5029136735035711671, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
       insertIndex: -1
@@ -19368,6 +19371,61 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 813395103}
   m_CullTransparentMesh: 1
+--- !u!1 &821657750
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 821657751}
+  - component: {fileID: 821657752}
+  m_Layer: 0
+  m_Name: UploadZone
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &821657751
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 821657750}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: -0.00001}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 320953533}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &821657752
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 821657750}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 88000e6fe05a77544b24601db9e75eec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UploadZoneVisual
+  zoneShader: {fileID: 4800000, guid: 04bb583d12d7c534aa179b60a17672e3, type: 3}
+  radius: 5
+  zoneCenter: {fileID: 821657751}
+  floorOffset: 0.025
+  uploadingColor: {r: 0.1, g: 3, b: 0.4, a: 1}
+  pausedColor: {r: 3, g: 0.1, b: 0.1, a: 1}
+  completeColor: {r: 0.1, g: 3, b: 0.4, a: 1}
+  interiorOpacity: 0.05
+  pulseSpeed: 1
+  completeDuration: 1.5
+  state: 0
 --- !u!1 &822174525
 GameObject:
   m_ObjectHideFlags: 0
@@ -32551,6 +32609,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MissionUI
   terminal: {fileID: 1538068997}
+  missionVoice: {fileID: 0}
   font: {fileID: 12800000, guid: 8200c44b654040641bf7538b9f1a1ef7, type: 3}
   stageText: {fileID: 1425052770}
   progressBar: {fileID: 432534498}
@@ -32559,12 +32618,12 @@ MonoBehaviour:
   interactText: {fileID: 260973648}
   timerText: {fileID: 1913532706}
   interactString: "\u300C E \u300D\u30A6\u30A4\u30EB\u30B9\u3092\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u3059\u308B"
-  waitingToStartText: "\u30B9\u30BF\u30FC\u30C8\u30C9\u30A2\u3092\u958B\u3051\u308B"
-  reachTerminalText: "\u30BF\u30FC\u30DF\u30CA\u30EB\u3092\u63A2\u3059"
+  waitingToStartText: "\u30C9\u30A2\u306E\u958B\u9589\u30DC\u30BF\u30F3\u3092\u6483\u3063\u3066\u3001\u30DF\u30C3\u30B7\u30E7\u30F3\u3092\u958B\u59CB\u305B\u3088"
+  reachTerminalText: "\u30BF\u30FC\u30DF\u30CA\u30EB\u3092\u63A2\u3057\u51FA\u305B"
   uploadingText: "\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u4E2D"
   uploadPausedText: "\u4E00\u6642\u505C\u6B62\u4E2D\u3002\u30BF\u30FC\u30DF\u30CA\u30EB\u306B\u623B\u308B"
   uploadCompleteText: "\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u5B8C\u4E86"
-  reachExtractionText: "\u51FA\u53E3\u306E\u30ED\u30C3\u30AF\u89E3\u9664\u3002\u8131\u51FA\u5730\u70B9\u3078\u5411\u304B\u3046"
+  reachExtractionText: "\u51FA\u53E3\u306E\u30ED\u30C3\u30AF\u304C\u89E3\u9664\u3055\u308C\u305F\u3002\u8131\u51FA\u5730\u70B9\u3078\u5411\u304B\u3048\u3002"
   pausedColor: {r: 1, g: 0.5, b: 0.5, a: 1}
   uploadCompleteDelay: 3
   resultsDelay: 3
@@ -44627,6 +44686,7 @@ MonoBehaviour:
   uploadCompleted: 0
   playerInRange: 0
   uploadProgress: 0
+  uploadZone: {fileID: 821657752}
 --- !u!1 &1552275595 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: -7015105103574601812, guid: 7ee67e89e30914486a6bd4950b6609cc, type: 3}
@@ -44822,6 +44882,7 @@ GameObject:
   - component: {fileID: 1616846169}
   - component: {fileID: 1616846170}
   - component: {fileID: 1616846171}
+  - component: {fileID: 1616846172}
   m_Layer: 0
   m_Name: GAME MANAGER
   m_TagString: Untagged
@@ -44851,7 +44912,7 @@ MonoBehaviour:
   - {fileID: 200379269}
   - {fileID: 822174528}
   - {fileID: 56940173}
-  bloodHitAlpha: 0.3
+  bloodHitAlpha: 0.2
   bloodFadeTime: 3
   blaster: {fileID: 60795184}
   visorHud: {fileID: 9063521800224147147}
@@ -44989,7 +45050,7 @@ AudioSource:
   m_audioClip: {fileID: 0}
   m_Resource: {fileID: 8300000, guid: fdae6e38b4daaef4fb4602298a841ad5, type: 3}
   m_PlayOnAwake: 1
-  m_Volume: 0.1
+  m_Volume: 0.2
   m_Pitch: 1
   Loop: 1
   Mute: 0
@@ -45147,6 +45208,26 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::MissionManager
   state: 0
   elapsedTime: 0
+--- !u!114 &1616846172
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1616846164}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f089471ab85da8c4d9752f1482dcd141, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MissionVoice
+  waitingToStart: {fileID: 8300000, guid: 4c031037f4aed6e4fae89f2168c88fd1, type: 3}
+  reachTerminal: {fileID: 8300000, guid: 53216969e0871474aa323637467625f1, type: 3}
+  terminalInRange: {fileID: 8300000, guid: 53216969e0871474aa323637467625f1, type: 3}
+  uploading: {fileID: 8300000, guid: 6a6c449981b1a8e47ba3f6c4c7c1c3e8, type: 3}
+  uploadComplete: {fileID: 8300000, guid: 195719d56564dc548af358b73aa1a659, type: 3}
+  reachExtraction: {fileID: 8300000, guid: 66b8bc086da4b3941850e7361db8add8, type: 3}
+  missionComplete: {fileID: 8300000, guid: afb7f7f42883e7941a4e41a697434262, type: 3}
+  volume: 1
 --- !u!1001 &1627422402
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -61876,6 +61957,7 @@ RectTransform:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
+  - {fileID: 1616846166}
   - {fileID: 1834901230}
   - {fileID: 935083946}
   - {fileID: 925920854}
@@ -61889,7 +61971,6 @@ SceneRoots:
   - {fileID: 1429901936}
   - {fileID: 1251416337}
   - {fileID: 4590755680282502747}
-  - {fileID: 1616846166}
   - {fileID: 1006280080}
   - {fileID: 827291614}
   - {fileID: 261812369}

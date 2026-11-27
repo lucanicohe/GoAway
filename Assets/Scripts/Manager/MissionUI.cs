@@ -11,6 +11,8 @@ public class MissionUI : MonoBehaviour
 {
     [Header("References")]
     public VirusTerminal terminal;
+    public MissionVoice missionVoice;
+
     [Tooltip("Only used for the results screen.")]
     public Font font;
 
@@ -158,6 +160,8 @@ public class MissionUI : MonoBehaviour
             if (completedAt < 0f)
             {
                 completedAt = Time.unscaledTime;
+                if (missionVoice != null)
+                    missionVoice.Play(MissionVoice.Cue.MissionComplete);
 
                 SetText(timerText, mission.GetFormattedTime());
                 SetShown(timerText, true);
@@ -202,31 +206,56 @@ public class MissionUI : MonoBehaviour
     void UpdateStage(MissionManager.MissionState state)
     {
         string text;
+        MissionVoice.Cue cue;
 
         switch (state)
         {
             case MissionManager.MissionState.WaitingToStart:
+
                 text = waitingToStartText;
+                cue = MissionVoice.Cue.WaitingToStart;
                 break;
 
             case MissionManager.MissionState.ReachTerminal:
+
                 text = reachTerminalText;
+
+                cue = terminal != null && terminal.CanInteract
+                    ? MissionVoice.Cue.TerminalInRange
+                    : MissionVoice.Cue.ReachTerminal;
+
                 break;
 
             case MissionManager.MissionState.Uploading:
-                text = terminal != null && terminal.IsPaused
+
+                bool paused = terminal != null && terminal.IsPaused;
+
+                text = paused
                     ? uploadPausedText
                     : uploadingText;
+
+                cue = MissionVoice.Cue.Uploading;
                 break;
 
-            default: // ReachExtraction
-                text = UploadCompleteVisible(state)
+            default:
+
+                bool complete = UploadCompleteVisible(state);
+
+                text = complete
                     ? uploadCompleteText
                     : reachExtractionText;
+
+                cue = complete
+                    ? MissionVoice.Cue.UploadComplete
+                    : MissionVoice.Cue.ReachExtraction;
+
                 break;
         }
 
         SetText(stageText, text);
+
+        if (missionVoice != null)
+            missionVoice.Play(cue);
     }
 
     // upload paused (the player walked out of the upload zone): the stage text and the bar fill turn half-saturated red.
