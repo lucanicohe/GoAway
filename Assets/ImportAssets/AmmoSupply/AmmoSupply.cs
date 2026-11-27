@@ -5,9 +5,16 @@ using UnityEngine.InputSystem;
 
 public class AmmoSupply : MonoBehaviour
 {
+
+
     [Header("References")]
     public GameManager gameManager;
     public Shader circleShader, iconShader;
+
+    [Header("Battery Charge")]
+    [SerializeField] private Renderer[] chargeCylinders;
+    [SerializeField, Range(0f, 1f)]
+    private float depletedGlow = 0.02f;
 
     [Header("Supply Zone")]
     [Min(.1f)] public float radius = 1f;
@@ -112,7 +119,7 @@ public class AmmoSupply : MonoBehaviour
 
         if (consumed && fade <= 0f)
         {
-            Destroy(gameObject);
+            enabled = false;
             return;
         }
 
@@ -172,6 +179,8 @@ public class AmmoSupply : MonoBehaviour
 
             consumed = true;
             consumedAt = Time.time;
+
+            DimBattery();
 
             SetPrompt(false);
 
@@ -249,5 +258,24 @@ public class AmmoSupply : MonoBehaviour
     {
         Gizmos.color = Color.green;
         Gizmos.DrawWireSphere(transform.position, radius);
+    }
+
+    void DimBattery()
+    {
+        foreach (Renderer cylinder in chargeCylinders)
+        {
+            if (!cylinder)
+                continue;
+
+            Material mat = cylinder.material;
+
+            if (mat.HasProperty("_EmissionColor"))
+            {
+                Color emission = mat.GetColor("_EmissionColor");
+
+                mat.SetColor("_EmissionColor",
+                    emission * depletedGlow);
+            }
+        }
     }
 }
