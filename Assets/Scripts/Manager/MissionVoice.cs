@@ -32,6 +32,7 @@ public class MissionVoice : MonoBehaviour
     private AudioSource source;
     private Cue lastCue = Cue.None;
     private bool terminalInRangePlayed;
+    [SerializeField] private float firstVoiceDelay = 2f;
 
     void Awake()
     {
@@ -79,6 +80,10 @@ public class MissionVoice : MonoBehaviour
         source.Stop();
         source.volume = volume;
         source.clip = clip;
-        source.Play();
+
+        if (cue == Cue.WaitingToStart)
+            source.PlayDelayed(firstVoiceDelay);
+        else
+            source.Play();
     }
 }

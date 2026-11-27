@@ -5633,6 +5633,7 @@ MonoBehaviour:
   reachExtraction: {fileID: 8300000, guid: 66b8bc086da4b3941850e7361db8add8, type: 3}
   missionComplete: {fileID: 8300000, guid: afb7f7f42883e7941a4e41a697434262, type: 3}
   volume: 1
+  firstVoiceDelay: 3
 --- !u!82 &568834087
 AudioSource:
   m_ObjectHideFlags: 0
