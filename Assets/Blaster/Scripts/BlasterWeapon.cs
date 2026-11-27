@@ -472,6 +472,7 @@ public class BlasterWeapon : MonoBehaviour
             l.intensity = boltLightIntensity;
             l.range = boltLightRange;
             l.shadows = LightShadows.None;
+            l.renderMode = LightRenderMode.ForcePixel;
             boltLights.Add(l);
         }
 

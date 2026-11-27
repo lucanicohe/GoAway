@@ -87,6 +87,7 @@ public class BlasterMuzzleFlash : MonoBehaviour
             flashLight.intensity = lightIntensity;
             flashLight.range = lightRange;
             flashLight.shadows = LightShadows.None;
+            flashLight.renderMode = LightRenderMode.ForcePixel;
             flashLight.enabled = false;
         }
 
