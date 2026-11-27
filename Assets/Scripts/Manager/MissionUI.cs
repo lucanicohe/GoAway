@@ -18,10 +18,13 @@ public class MissionUI : MonoBehaviour
 
     [Header("My UI elements (drag them in from the Hierarchy)")]
     public Text stageText;
+
     [Tooltip("The object that holds the bar's Back and Fill.")]
     public GameObject progressBar;
+
     [Tooltip("The Fill image of the bar.")]
     public Image progressFill;
+
     public Text progressText;
     public Text interactText;
     public Text timerText;
@@ -36,26 +39,32 @@ public class MissionUI : MonoBehaviour
     public string reachExtractionText = "出口のロック解除。脱出地点へ向かう";
 
     [Header("Upload paused look (the player left the upload zone)")]
-    [Tooltip("Colour of the stage text and of the progress bar fill while the upload is paused. Default = red at half saturation. " +
-             "The alpha of the normal colours is kept, and everything goes back to the normal colours when the upload resumes.")]
+    [Tooltip("Colour of the stage text and of the progress bar fill while the upload is paused.")]
     public Color pausedColor = new Color(1f, 0.5f, 0.5f, 1f);
 
     [Header("Timing")]
     [Tooltip("Seconds 'upload complete' and the full bar stay on screen before the next stage.")]
     public float uploadCompleteDelay = 3f;
-    [Tooltip("Only used when Show Results Screen is ticked: seconds between reaching the last room and the results screen.")]
+
+    [Tooltip("Only used when Show Results Screen is ticked.")]
     public float resultsDelay = 3f;
 
     [Header("Results screen")]
     [Tooltip("Off = after the last room you only see the timer and the visor. On = the results screen covers everything after Results Delay seconds.")]
     public bool showResultsScreen = false;
+
     public Color accentColor = new Color(0.45f, 0.85f, 0.95f);
     public Color textColor = new Color(0.84f, 0.93f, 0.96f);
 
+    [Header("Return To Title")]
+    public Button returnToTitleButton;
+    public string titleSceneName = "intro";
+
     [Header("Mission Completion")]
-    [Tooltip("Drag the player's movement, look and weapon scripts here. They are switched off when the last room is reached.")]
+    [Tooltip("Drag the player's movement, look and weapon scripts here.")]
     public Behaviour[] disableOnCompletion;
-    [Tooltip("Freezes the whole game (Time.timeScale 0) when the last room is reached.")]
+
+    [Tooltip("Freezes the whole game when the last room is reached.")]
     public bool pauseOnCompletion = true;
 
     private VisorHud visor;
@@ -71,7 +80,6 @@ public class MissionUI : MonoBehaviour
     private float completedAt = -1f;
     private int lastPercent = -1;
 
-    // the colours the two elements have in the Inspector: the paused look goes back to them
     private Color stageNormalColor = Color.white;
     private Color fillNormalColor = Color.white;
     private bool pausedStyleOn;
@@ -104,14 +112,21 @@ public class MissionUI : MonoBehaviour
 
         BuildUI();
 
-        // remember the normal colours (the paused look returns to them)
+        // Hide the return button until mission completion.
+        if (returnToTitleButton != null)
+        {
+            returnToTitleButton.gameObject.SetActive(false);
+            returnToTitleButton.onClick.AddListener(ReturnToTitle);
+        }
+
+        // Remember the normal colours.
         if (stageText != null)
             stageNormalColor = stageText.color;
 
         if (progressFill != null)
             fillNormalColor = progressFill.color;
 
-        // the bar is cut off by the same effect the health and ammo bars use
+        // Set up the progress bar wipe.
         if (progressFill != null)
         {
             progressFill.type = Image.Type.Simple;
@@ -128,7 +143,6 @@ public class MissionUI : MonoBehaviour
 
         SetText(interactText, interactString);
 
-        // hidden until needed: timer, interact prompt, upload bar and percentage
         SetShown(timerText, false);
         SetShown(interactText, false);
         SetShown(progressBar, false);
@@ -142,7 +156,7 @@ public class MissionUI : MonoBehaviour
         if (mission == null || root == null)
             return;
 
-        // player is dead: the mission UI and the crosshair stay hidden
+        // Player is dead.
         if (playerDead)
             return;
 
@@ -161,17 +175,19 @@ public class MissionUI : MonoBehaviour
 
         if (state == MissionManager.MissionState.Completed)
         {
-            // last room: the timer shows the final time and everything except the visor is hidden
+            // Only runs once upon mission completion.
             if (completedAt < 0f)
             {
                 completedAt = Time.unscaledTime;
+
                 if (missionVoice != null)
-                    missionVoice.Play(MissionVoice.Cue.MissionComplete);
+                    missionVoice.Play(
+                        MissionVoice.Cue.MissionComplete
+                    );
 
                 SetText(timerText, mission.GetFormattedTime());
                 SetShown(timerText, true);
 
-                // the crosshair goes away together with the rest of the UI
                 visor.SetCrosshairHidden(true);
 
                 SetShown(stageText, false);
@@ -180,17 +196,32 @@ public class MissionUI : MonoBehaviour
                 SetShown(progressText, false);
 
                 FreezeGame();
+
+                // Show the existing return-to-title button.
+                if (returnToTitleButton != null)
+                {
+                    returnToTitleButton.gameObject.SetActive(true);
+                    returnToTitleButton.transform.SetAsLastSibling();
+                }
+
+                // Release the FPS cursor.
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+
+                EnsureEventSystem();
             }
 
-            // the game is frozen here, so the delay has to run on real time
+            // Optional generated results screen.
             if (showResultsScreen &&
                 Time.unscaledTime - completedAt >= resultsDelay)
+            {
                 ShowResults();
+            }
 
             return;
         }
 
-        // upload just finished: keep "upload complete" and the full bar for a moment
+        // Upload just finished.
         if (lastState == MissionManager.MissionState.Uploading &&
             state == MissionManager.MissionState.ReachExtraction)
         {
@@ -205,10 +236,10 @@ public class MissionUI : MonoBehaviour
         UpdateInteract();
     }
 
-    /// <summary>
-    /// Called by GameManager when the player's health reaches 0: hides every mission UI element and the crosshair,
-    /// and keeps them hidden (LateUpdate stops touching them).
-    /// </summary>
+    // =========================================
+    // PLAYER DEATH
+    // =========================================
+
     public void HideForDeath()
     {
         playerDead = true;
@@ -221,6 +252,7 @@ public class MissionUI : MonoBehaviour
         SetShown(timerText, false);
         SetShown(progressBar, false);
         SetShown(progressText, false);
+        SetShown(returnToTitleButton, false);
 
         if (visor != null)
             visor.SetCrosshairHidden(true);
@@ -231,6 +263,10 @@ public class MissionUI : MonoBehaviour
         return state == MissionManager.MissionState.ReachExtraction &&
                Time.time < uploadCompleteUntil;
     }
+
+    // =========================================
+    // MISSION STAGE
+    // =========================================
 
     void UpdateStage(MissionManager.MissionState state)
     {
@@ -287,8 +323,10 @@ public class MissionUI : MonoBehaviour
             missionVoice.Play(cue);
     }
 
-    // upload paused (the player walked out of the upload zone): the stage text and the bar fill turn half-saturated red.
-    // Only touches the colours when the paused state changes.
+    // =========================================
+    // UPLOAD PAUSED STYLE
+    // =========================================
+
     void UpdatePausedStyle(MissionManager.MissionState state)
     {
         bool paused =
@@ -318,6 +356,10 @@ public class MissionUI : MonoBehaviour
         return c;
     }
 
+    // =========================================
+    // UPLOAD PROGRESS
+    // =========================================
+
     void UpdateUpload(MissionManager.MissionState state)
     {
         bool show =
@@ -337,7 +379,6 @@ public class MissionUI : MonoBehaviour
         if (progressWipe != null)
             progressWipe.Set(progress, Vector2.left);
 
-        // the text is only rewritten when the number changes
         int percent = Mathf.FloorToInt(progress * 100f);
 
         if (percent != lastPercent)
@@ -353,12 +394,11 @@ public class MissionUI : MonoBehaviour
 
         SetShown(interactText, show);
 
-        // the interact text takes the place of the crosshair
         visor.SetCrosshairHidden(show);
     }
 
     // =========================================
-    // UI GENERATION (results screen only)
+    // UI GENERATION
     // =========================================
 
     void BuildUI()
@@ -379,7 +419,7 @@ public class MissionUI : MonoBehaviour
     }
 
     // =========================================
-    // RESULTS SCREEN
+    // OPTIONAL RESULTS SCREEN
     // =========================================
 
     void BuildEndScreen()
@@ -502,7 +542,10 @@ public class MissionUI : MonoBehaviour
         resultsGroup.blocksRaycasts = true;
     }
 
-    // last room: switch off the player's scripts and stop the game
+    // =========================================
+    // FREEZE GAME
+    // =========================================
+
     void FreezeGame()
     {
         foreach (Behaviour control in disableOnCompletion)
@@ -517,16 +560,23 @@ public class MissionUI : MonoBehaviour
             previousTimeScale = Time.timeScale;
             Time.timeScale = 0f;
 
-            // all audio pauses too, except the mission voice (so the "mission complete" line is still heard)
+            // Pause all audio except the mission voice.
             if (missionVoice != null)
             {
-                foreach (AudioSource voice in missionVoice.GetComponentsInChildren<AudioSource>(true))
+                foreach (AudioSource voice in
+                    missionVoice.GetComponentsInChildren<AudioSource>(true))
+                {
                     voice.ignoreListenerPause = true;
+                }
             }
 
             AudioListener.pause = true;
         }
     }
+
+    // =========================================
+    // SHOW OPTIONAL RESULTS
+    // =========================================
 
     void ShowResults()
     {
@@ -563,21 +613,38 @@ public class MissionUI : MonoBehaviour
 
         endPanel.gameObject.SetActive(true);
         endPanel.SetAsLastSibling();
+    }
+
+    // =========================================
+    // SCENE NAVIGATION
+    // =========================================
+
+    public void ReturnToTitle()
+    {
+        Time.timeScale = 1f;
+        AudioListener.pause = false;
+        frozen = false;
 
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
 
-        EnsureEventSystem();
+        SceneManager.LoadScene(titleSceneName);
     }
 
     public void RetryMission()
     {
         Time.timeScale = previousTimeScale;
+        AudioListener.pause = false;
+        frozen = false;
 
         SceneManager.LoadScene(
             SceneManager.GetActiveScene().name
         );
     }
+
+    // =========================================
+    // EVENT SYSTEM
+    // =========================================
 
     void EnsureEventSystem()
     {
@@ -603,7 +670,6 @@ public class MissionUI : MonoBehaviour
     // HELPERS
     // =========================================
 
-    // both helpers do nothing if an element was not dragged in, and only touch the UI when something changes
     static void SetText(Text text, string value)
     {
         if (text != null && text.text != value)
@@ -706,6 +772,7 @@ public class MissionUI : MonoBehaviour
     {
         int minutes = Mathf.FloorToInt(time / 60f);
         int seconds = Mathf.FloorToInt(time % 60f);
+
         int hundredths =
             Mathf.FloorToInt((time % 1f) * 100f);
 
@@ -714,6 +781,9 @@ public class MissionUI : MonoBehaviour
 
     void OnDestroy()
     {
+        if (returnToTitleButton != null)
+            returnToTitleButton.onClick.RemoveListener(ReturnToTitle);
+
         if (frozen)
         {
             Time.timeScale = previousTimeScale;
