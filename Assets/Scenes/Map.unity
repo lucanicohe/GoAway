@@ -312,8 +312,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: -240}
-  m_SizeDelta: {x: 160, y: 30}
+  m_AnchoredPosition: {x: 0, y: -156.9}
+  m_SizeDelta: {x: 81.5, y: 15}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &46685499
 MonoBehaviour:
@@ -337,7 +337,7 @@ MonoBehaviour:
   m_Transition: 1
   m_Colors:
     m_NormalColor: {r: 1, g: 1, b: 1, a: 1}
-    m_HighlightedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
+    m_HighlightedColor: {r: 0.5655058, g: 1, b: 0.5058824, a: 1}
     m_PressedColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 1}
     m_SelectedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
     m_DisabledColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 0.5019608}
@@ -379,7 +379,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 21300000, guid: e8cf8e736f48f8e479b0a14ecdab317d, type: 3}
+  m_Sprite: {fileID: 21300000, guid: 04e5469bb2f0c46ff885e196c1a30813, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -33672,6 +33672,17 @@ MonoBehaviour:
   flatheadTemperature: 50
   flatheadTurretTemperature: 80
   flatheadScanInterval: 0.5
+  thermalSwitchSound: {fileID: 8300000, guid: f4a8210270f45431384c83d6669c95de, type: 3}
+  thermalSwitchVolume: 1
+  thermalLoopSound: {fileID: 8300000, guid: 3c45a3eb889cf4c0983f969594a7b0f5, type: 3}
+  thermalLoopVolume: 0.5
+  thermalLoopFadeTime: 0.25
+  lowPassAmount: 0.7
+  lowPassMostMuffledCutoff: 300
+  lowPassResonance: 1
+  lowPassFadeTime: 0.3
+  thermalSoundsIgnoreLowPass: 0
+  audioListener: {fileID: 1904577194}
   thermalObjects:
   - target: {fileID: 981076353}
     temperature: 33
@@ -49085,6 +49096,17 @@ MonoBehaviour:
   flatheadTemperature: 50
   flatheadTurretTemperature: 80
   flatheadScanInterval: 0.5
+  thermalSwitchSound: {fileID: 0}
+  thermalSwitchVolume: 1
+  thermalLoopSound: {fileID: 0}
+  thermalLoopVolume: 0.5
+  thermalLoopFadeTime: 0.25
+  lowPassAmount: 0.7
+  lowPassMostMuffledCutoff: 300
+  lowPassResonance: 1
+  lowPassFadeTime: 0.3
+  thermalSoundsIgnoreLowPass: 0
+  audioListener: {fileID: 0}
   thermalObjects: []
 --- !u!1 &1856095411
 GameObject:

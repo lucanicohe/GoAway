@@ -5,6 +5,7 @@ using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
+[DefaultExecutionOrder(1000)]   // runs after the Flathead scripts, so it always sees a material swap they made
 public class ThermalChanger : MonoBehaviour
 {
     [System.Serializable]
@@ -116,6 +117,35 @@ public class ThermalChanger : MonoBehaviour
     [Tooltip("While thermal mode is on, how often (seconds) to look for Flatheads that spawned after it was switched on.")]
     [SerializeField] private float flatheadScanInterval = 0.5f;
 
+    [Header("Thermal Sounds")]
+    [Tooltip("Plays once when you switch INTO thermal mode. It is NOT played when you switch back to normal mode.")]
+    [SerializeField] private AudioClip thermalSwitchSound;
+    [Range(0f, 1f)]
+    [SerializeField] private float thermalSwitchVolume = 1f;
+    [Tooltip("Loops the whole time thermal mode is on and fades out when you go back to normal mode.")]
+    [SerializeField] private AudioClip thermalLoopSound;
+    [Range(0f, 1f)]
+    [SerializeField] private float thermalLoopVolume = 0.5f;
+    [Tooltip("Seconds the loop takes to fade in and out.")]
+    [SerializeField] private float thermalLoopFadeTime = 0.25f;
+
+    [Header("Thermal Low Pass (all game sounds)")]
+    [Tooltip("How muffled everything sounds in thermal mode. 0 = no effect, 1 = most muffled. Works live while playing.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float lowPassAmount = 0.7f;
+    [Tooltip("Cutoff in Hz when the amount is 1 (lower = more muffled at full amount).")]
+    [Range(10f, 5000f)]
+    [SerializeField] private float lowPassMostMuffledCutoff = 300f;
+    [Tooltip("Resonance of the filter (1 = flat, higher = a bump at the cutoff).")]
+    [Range(1f, 10f)]
+    [SerializeField] private float lowPassResonance = 1f;
+    [Tooltip("Seconds the low pass takes to fade in and out when you switch modes.")]
+    [SerializeField] private float lowPassFadeTime = 0.3f;
+    [Tooltip("Ticked: the two thermal sounds above stay clear. Unticked: they go through the low pass too, like every other sound.")]
+    [SerializeField] private bool thermalSoundsIgnoreLowPass = false;
+    [Tooltip("The Audio Listener (usually on the camera). Found automatically if empty. The low pass is added to it, so it affects every sound.")]
+    [SerializeField] private AudioListener audioListener;
+
     [Header("Objects with Custom Temperature")]
     [SerializeField] private List<ThermalObject> thermalObjects = new List<ThermalObject>();
 
@@ -123,7 +153,19 @@ public class ThermalChanger : MonoBehaviour
     private float nextFlatheadScanTime;
     private Coroutine postExposureRoutine;
 
+    // thermal sounds + low pass
+    private AudioSource switchSource;
+    private AudioSource loopSource;
+    private AudioListener hookedListener;
+    private AudioLowPassFilter listenerLowPass;
+    private float lowPassBlend;            // 0 = clear, 1 = full thermal low pass
+    private float nextListenerFindTime;
+    private const float ClearCutoff = 22000f;
+
     private readonly Dictionary<Renderer, Material[]> originalMaterials = new();
+    private readonly Dictionary<Renderer, Material[]> flatheadThermalMats = new();   // thermal materials given to Flathead renderers
+    private readonly List<Material> flatheadCheckMats = new();                       // reusable buffer (no allocation per frame)
+    private readonly List<Renderer> flatheadStale = new();
     private readonly List<Material> thermalInstances = new();
 
     // blaster heat
@@ -159,6 +201,8 @@ public class ThermalChanger : MonoBehaviour
         currentGunBodyTemperature = gunBodyMinTemperature;
         FindBlaster();
 
+        SetupThermalAudio();
+
         Debug.Log("NORMAL MODE");
     }
 
@@ -181,6 +225,7 @@ public class ThermalChanger : MonoBehaviour
         }
 
         UpdateBarrelHeat();
+        UpdateThermalAudio();
 
         // Flatheads that spawned while thermal mode was already on (e.g. "Respawn Flatheads") get the thermal look too
         if (thermalMode && Time.time >= nextFlatheadScanTime)
@@ -188,6 +233,73 @@ public class ThermalChanger : MonoBehaviour
             nextFlatheadScanTime = Time.time + Mathf.Max(0.1f, flatheadScanInterval);
             ApplyThermalToNewFlatheads();
         }
+    }
+
+    private void LateUpdate()
+    {
+        if (thermalMode)
+            KeepFlatheadsThermal();
+    }
+
+    // ---------------------------------------------------------------- Virus upload: Flathead material swap
+
+    // When the virus upload is complete, the FlatheadController puts the NORMAL material on every Flathead.
+    // In thermal mode that would wipe the thermal look, so it is put back here and the swapped-in material is
+    // remembered as the Flathead's "normal mode" look.
+    private void KeepFlatheadsThermal()
+    {
+        if (flatheadThermalMats.Count == 0)
+            return;
+
+        flatheadStale.Clear();
+
+        foreach (var pair in flatheadThermalMats)
+        {
+            Renderer rend = pair.Key;
+
+            if (rend == null)
+            {
+                flatheadStale.Add(rend);
+                continue;
+            }
+
+            Material[] thermal = pair.Value;
+            rend.GetSharedMaterials(flatheadCheckMats);
+
+            bool same = flatheadCheckMats.Count == thermal.Length;
+            for (int i = 0; same && i < thermal.Length; i++)
+            {
+                if (flatheadCheckMats[i] != thermal[i])
+                    same = false;
+            }
+
+            if (same)
+                continue;
+
+            // somebody swapped the materials (normal material after the upload): remember it, show thermal again
+            originalMaterials[rend] = rend.sharedMaterials;
+            rend.sharedMaterials = thermal;
+        }
+
+        for (int i = 0; i < flatheadStale.Count; i++)
+            flatheadThermalMats.Remove(flatheadStale[i]);
+    }
+
+    // After the upload, normal mode shows the Flathead's NORMAL material. Before the upload this returns null
+    // and the renderer simply gets its original (stealth) material back.
+    private Material GetFlatheadNormalMaterial(Renderer rend)
+    {
+        if (!MissionManager.EnemiesMalfunctioning)
+            return null;
+
+        if (!(rend is MeshRenderer) && !(rend is SkinnedMeshRenderer))
+            return null;
+
+        FlatheadEnemy flathead = rend.GetComponentInParent<FlatheadEnemy>();
+        if (flathead == null || flathead.Ctrl == null)
+            return null;
+
+        return flathead.Ctrl.normalMaterial;
     }
 
     // ---------------------------------------------------------------- Flatheads spawned after thermal mode was switched on
@@ -302,6 +414,7 @@ public class ThermalChanger : MonoBehaviour
         );
 
         originalMaterials.Clear();
+        flatheadThermalMats.Clear();
         thermalInstances.Clear();
         barrelInstances.Clear();
         gunBodyInstances.Clear();
@@ -345,6 +458,9 @@ public class ThermalChanger : MonoBehaviour
         else
             SetPostExposure(thermalPostExposure);
 
+        PlayThermalSwitchSound();
+        StartThermalLoop();
+
         Debug.Log($"THERMAL MODE: {originalMaterials.Count} renderers updated.");
     }
 
@@ -383,6 +499,9 @@ public class ThermalChanger : MonoBehaviour
         }
 
         rend.sharedMaterials = newMaterials;
+
+        if (rend.GetComponentInParent<FlatheadEnemy>() != null)
+            flatheadThermalMats[rend] = newMaterials;
     }
 
     private float GetTemperature(Renderer rend)
@@ -553,8 +672,24 @@ public class ThermalChanger : MonoBehaviour
 
         foreach (var entry in originalMaterials)
         {
-            if (entry.Key != null)
+            if (entry.Key == null)
+                continue;
+
+            // Flathead after the virus upload: normal mode = the normal material (not the invisible stealth one)
+            Material flatheadNormal = GetFlatheadNormalMaterial(entry.Key);
+
+            if (flatheadNormal != null)
+            {
+                Material[] mats = new Material[entry.Value.Length];
+                for (int i = 0; i < mats.Length; i++)
+                    mats[i] = flatheadNormal;
+
+                entry.Key.sharedMaterials = mats;
+            }
+            else
+            {
                 entry.Key.sharedMaterials = entry.Value;
+            }
         }
 
         foreach (Material instance in thermalInstances)
@@ -564,6 +699,7 @@ public class ThermalChanger : MonoBehaviour
         }
 
         originalMaterials.Clear();
+        flatheadThermalMats.Clear();
         thermalInstances.Clear();
         barrelInstances.Clear();
         gunBodyInstances.Clear();
@@ -609,8 +745,150 @@ public class ThermalChanger : MonoBehaviour
         Debug.Log("NORMAL MODE: Original materials restored.");
     }
 
+    // ---------------------------------------------------------------- Thermal sounds + low pass
+
+    private void SetupThermalAudio()
+    {
+        if (switchSource == null)
+            switchSource = CreateThermalAudioSource("Thermal Switch Sound", false);
+
+        if (loopSource == null)
+            loopSource = CreateThermalAudioSource("Thermal Loop Sound", true);
+
+        FindListenerLowPass();
+    }
+
+    private AudioSource CreateThermalAudioSource(string objectName, bool loop)
+    {
+        GameObject go = new GameObject(objectName);
+        go.transform.SetParent(transform, false);
+
+        AudioSource src = go.AddComponent<AudioSource>();
+        src.playOnAwake = false;
+        src.loop = loop;
+        src.spatialBlend = 0f;                              // 2D: same loudness everywhere
+        src.bypassListenerEffects = thermalSoundsIgnoreLowPass;
+        return src;
+    }
+
+    private void PlayThermalSwitchSound()
+    {
+        // only when switching INTO thermal mode (this is called from ApplyThermalMode only)
+        if (switchSource != null && thermalSwitchSound != null)
+            switchSource.PlayOneShot(thermalSwitchSound, thermalSwitchVolume);
+    }
+
+    private void StartThermalLoop()
+    {
+        if (loopSource == null || thermalLoopSound == null)
+            return;
+
+        if (loopSource.clip != thermalLoopSound)
+        {
+            loopSource.Stop();
+            loopSource.clip = thermalLoopSound;
+        }
+
+        if (!loopSource.isPlaying)
+        {
+            loopSource.volume = 0f;      // fades in (see UpdateThermalAudio)
+            loopSource.Play();
+        }
+    }
+
+    private void UpdateThermalAudio()
+    {
+        float dt = Time.unscaledDeltaTime;
+
+        // ----- sources: bypass setting works live, loop fades in and out
+        if (switchSource != null)
+            switchSource.bypassListenerEffects = thermalSoundsIgnoreLowPass;
+
+        if (loopSource != null)
+        {
+            loopSource.bypassListenerEffects = thermalSoundsIgnoreLowPass;
+
+            float targetVolume = (thermalMode && thermalLoopSound != null) ? thermalLoopVolume : 0f;
+            float step = (Mathf.Max(0.0001f, thermalLoopVolume) / Mathf.Max(0.01f, thermalLoopFadeTime)) * dt;
+            loopSource.volume = Mathf.MoveTowards(loopSource.volume, targetVolume, step);
+
+            if (!thermalMode && loopSource.volume <= 0f && loopSource.isPlaying)
+                loopSource.Stop();
+        }
+
+        // ----- low pass on the audio listener (affects every sound)
+        if ((hookedListener == null || !hookedListener.isActiveAndEnabled) && Time.unscaledTime >= nextListenerFindTime)
+        {
+            nextListenerFindTime = Time.unscaledTime + 1f;
+            FindListenerLowPass();
+        }
+
+        if (listenerLowPass == null)
+            return;
+
+        lowPassBlend = Mathf.MoveTowards(lowPassBlend, thermalMode ? 1f : 0f, dt / Mathf.Max(0.01f, lowPassFadeTime));
+
+        float cutoff = ClearCutoff;
+        if (lowPassBlend > 0f)
+        {
+            float amount = Mathf.Clamp01(lowPassAmount) * lowPassBlend;
+            float muffled = Mathf.Clamp(lowPassMostMuffledCutoff, 10f, ClearCutoff);
+            cutoff = Mathf.Exp(Mathf.Lerp(Mathf.Log(ClearCutoff), Mathf.Log(muffled), amount));   // fades evenly to the ear
+        }
+
+        listenerLowPass.enabled = lowPassBlend > 0.001f;
+        listenerLowPass.cutoffFrequency = cutoff;
+        listenerLowPass.lowpassResonanceQ = lowPassResonance;
+    }
+
+    private void FindListenerLowPass()
+    {
+        AudioListener listener = audioListener;
+
+        if (listener == null || !listener.isActiveAndEnabled)
+        {
+            listener = null;
+
+            AudioListener[] all = FindObjectsByType<AudioListener>(FindObjectsSortMode.None);
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] != null && all[i].isActiveAndEnabled)
+                {
+                    listener = all[i];
+                    break;
+                }
+            }
+        }
+
+        if (listener == null || listener == hookedListener)
+            return;
+
+        // switched to another listener (e.g. new camera): clear the old filter first
+        if (listenerLowPass != null)
+        {
+            listenerLowPass.cutoffFrequency = ClearCutoff;
+            listenerLowPass.enabled = false;
+        }
+
+        AudioLowPassFilter filter = listener.GetComponent<AudioLowPassFilter>();
+        if (filter == null)
+            filter = listener.gameObject.AddComponent<AudioLowPassFilter>();
+
+        filter.cutoffFrequency = ClearCutoff;
+        filter.enabled = false;
+
+        hookedListener = listener;
+        listenerLowPass = filter;
+    }
+
     private void OnDestroy()
     {
+        if (listenerLowPass != null)
+        {
+            listenerLowPass.cutoffFrequency = ClearCutoff;
+            listenerLowPass.enabled = false;
+        }
+
         if (hookedBlaster != null)
             hookedBlaster.Fired -= OnBlasterShot;
 

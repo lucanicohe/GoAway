@@ -119,6 +119,33 @@ public class MissionUI : MonoBehaviour
             returnToTitleButton.onClick.AddListener(ReturnToTitle);
         }
 
+        // Auto-create stageText if it was not wired in the Inspector
+        // (protects against broken prefab references in WebGL builds).
+        if (stageText == null)
+        {
+            GameObject stageGo = new GameObject("Stage Text (auto)");
+            stageGo.transform.SetParent(transform, false);
+            RectTransform stageRt = stageGo.AddComponent<RectTransform>();
+            // Anchor to top-centre, just below the compass bar (~140 canvas units from top).
+            stageRt.anchorMin = new Vector2(0.5f, 1f);
+            stageRt.anchorMax = new Vector2(0.5f, 1f);
+            stageRt.pivot     = new Vector2(0.5f, 1f);
+            stageRt.anchoredPosition = new Vector2(0f, -145f);
+            stageRt.sizeDelta = new Vector2(900f, 40f);
+            stageText = stageGo.AddComponent<Text>();
+            stageText.font      = font;
+            stageText.fontSize  = 22;
+            stageText.fontStyle = FontStyle.Bold;
+            stageText.alignment = TextAnchor.UpperCenter;
+            stageText.color     = new Color(0.84f, 0.93f, 0.96f, 1f);
+            stageText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            stageText.verticalOverflow   = VerticalWrapMode.Overflow;
+            stageText.raycastTarget = false;
+            Shadow sh = stageGo.AddComponent<Shadow>();
+            sh.effectColor    = new Color(0f, 0f, 0f, 0.65f);
+            sh.effectDistance = new Vector2(1f, -1f);
+        }
+
         // Remember the normal colours.
         if (stageText != null)
             stageNormalColor = stageText.color;
