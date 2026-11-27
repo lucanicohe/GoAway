@@ -46,9 +46,35 @@ public class GameManager : MonoBehaviour
     [Min(0.01f)]
     [SerializeField] private float bloodFadeTime = 1f;
 
+    [Header("Death Screen (switched on when the player's health reaches 0)")]
+    [Tooltip("Drag your death screen Image object here. It is switched off at the start and set active when the player dies.")]
+    [SerializeField] private GameObject deathImage;
+    [Tooltip("Drag your first death screen Text object here (works with Text or TextMeshPro).")]
+    [SerializeField] private GameObject deathTextOne;
+    [Tooltip("Drag your second death screen Text object here (works with Text or TextMeshPro).")]
+    [SerializeField] private GameObject deathTextTwo;
+    [Tooltip("The game is paused when the player dies. After this many real seconds the scene below is loaded.")]
+    [Min(0f)]
+    [SerializeField] private float deathReloadDelay = 3f;
+    [Tooltip("Name of the scene that is loaded after the death screen. It must be in File > Build Settings > Scenes In Build.")]
+    [SerializeField] private string deathSceneName = "intro";
+
+    [Header("Player Sounds (drag in AudioSources that already have their clip)")]
+    [Tooltip("Plays every time the player takes damage (but not on the hit that kills him), each time with a slightly different pitch (0.9 to 1.1). The AudioSource must be on an object that is active, and 'Play On Awake' should be off.")]
+    [SerializeField] private AudioSource damageSound;
+    [Tooltip("The damage sound can only play again after this many seconds, so many hits in a row do not make it stutter. Default = 0.3.")]
+    [Min(0f)]
+    [SerializeField] private float damageSoundCooldown = 0.3f;
+    private float nextDamageSoundTime;
+    [Tooltip("Plays once when the player dies. The AudioSource must be on an object that is active, and 'Play On Awake' should be off.")]
+    [SerializeField] private AudioSource deathSound;
+    [Tooltip("Plays every time you click to fire (left mouse button) while the ammo is empty. The AudioSource must be on an object that is active, and 'Play On Awake' should be off.")]
+    [SerializeField] private AudioSource ammoEmptySound;
+
     [Header("References (auto-finds if empty)")]
     [SerializeField] private BlasterWeapon blaster;
     [SerializeField] private VisorHud visorHud;
+    [SerializeField] private MissionUI missionUI;
     [SerializeField] private WalkSprintRotationSway sway;
     [SerializeField] private BlasterRecoil recoil;
 
@@ -76,6 +102,10 @@ public class GameManager : MonoBehaviour
     [Tooltip("How many droids to spawn. Max = 14: eight stationary guard posts (NEW1-NEW8) and six patrol segments. Each Play start randomly selects unique posts/routes, favoring locations farther from droids already placed.")]
     [Range(0, MaxDroids)]
     [SerializeField] private int droidCount = 4;
+    [Tooltip("Slight tendency to spawn droids on the stand-still guard posts (NEW1-NEW8) instead of the patrol routes. " +
+             "1 = no preference (as before). 1.25 = slight tendency. Higher = more guards. A patrol route can still win when it is clearly farther from the other droids.")]
+    [Range(1f, 3f)]
+    [SerializeField] private float guardSpawnPreference = 1.25f;
 
     [Header("IG-88 Health")]
     [Tooltip("Health of every droid, applied when it spawns. A body hit takes 'Damage Per Player Hit Body' away, a headshot takes " +
@@ -528,6 +558,7 @@ public class GameManager : MonoBehaviour
         // Auto-find missing refs
         if (blaster == null) blaster = FindFirstObjectByType<BlasterWeapon>();
         if (visorHud == null) visorHud = FindFirstObjectByType<VisorHud>();
+        if (missionUI == null) missionUI = FindFirstObjectByType<MissionUI>();
         if (sway == null) sway = FindFirstObjectByType<WalkSprintRotationSway>();
         if (recoil == null) recoil = FindFirstObjectByType<BlasterRecoil>();
 
@@ -542,6 +573,9 @@ public class GameManager : MonoBehaviour
             if (cullingManager == null)
                 cullingManager = gameObject.AddComponent<EnemyCullingManager>();
         }
+
+        // death screen starts hidden
+        SetDeathScreen(false);
 
         // blood overlay starts invisible (alpha 0, colour untouched)
         bloodAlphas = new float[bloodImages.Count];
@@ -586,6 +620,7 @@ public class GameManager : MonoBehaviour
             {
                 playerWasAlive = false;
                 Debug.Log("Player is dead!");
+                OnPlayerDeath();
             }
             else if (hp > 0f)
             {
@@ -596,6 +631,11 @@ public class GameManager : MonoBehaviour
         reactiveSubscriptions.Add(UniRx.ObservableExtensions.Subscribe(PlayerDamaged, amt =>
         {
             if (amt > 0f) ShowBlood();
+            if (amt > 0f && PlayerAlive && Time.time >= nextDamageSoundTime)
+            {
+                nextDamageSoundTime = Time.time + damageSoundCooldown;
+                PlaySound(damageSound, true);
+            }
         }));
 
         if (blaster != null)
@@ -662,6 +702,12 @@ public class GameManager : MonoBehaviour
         UpdateBloodFade();
         TrackPlayerMovement();
 
+        // no ammo and the fire button is clicked: empty click sound (not while dead or paused)
+        if (!HasAmmo && PlayerAlive && Time.timeScale > 0f &&
+            UnityEngine.InputSystem.Mouse.current != null &&
+            UnityEngine.InputSystem.Mouse.current.leftButton.wasPressedThisFrame)
+            PlaySound(ammoEmptySound);
+
         // Note: blaster.enabled is now reactively managed by AmmoProperty.Subscribe (no per-frame check needed!)
 
         // keep path lengths correct if you move waypoints while playing
@@ -718,6 +764,53 @@ public class GameManager : MonoBehaviour
         {
             ammoText3D.text = currentAmmo.ToString();
         }
+    }
+
+    // Health reached 0: show the death screen, hide the crosshair and the whole mission UI.
+    private void OnPlayerDeath()
+    {
+        SetDeathScreen(true);
+
+        // all audio pauses, only the death sound keeps playing
+        AudioListener.pause = true;
+        if (deathSound != null) deathSound.ignoreListenerPause = true;
+        PlaySound(deathSound);
+
+        if (visorHud != null) visorHud.SetCrosshairHidden(true);
+        if (missionUI != null) missionUI.HideForDeath();
+
+        // pause the game, then go to the intro scene after the delay (real time, because the game time is paused)
+        Time.timeScale = 0f;
+        StartCoroutine(LoadSceneAfterDeath());
+    }
+
+    private System.Collections.IEnumerator LoadSceneAfterDeath()
+    {
+        yield return new WaitForSecondsRealtime(deathReloadDelay);
+
+        AudioListener.pause = false;
+        Time.timeScale = 1f;
+        UnityEngine.SceneManagement.SceneManager.LoadScene(deathSceneName);
+    }
+
+    // plays the clip on the AudioSource you dragged in (nothing happens if it is empty)
+    // randomPitch = true: every play gets a slightly different pitch (0.9 to 1.1)
+    private static void PlaySound(AudioSource source, bool randomPitch = false)
+    {
+        if (source == null || source.clip == null)
+            return;
+
+        if (randomPitch)
+            source.pitch = Random.Range(0.9f, 1.1f);
+
+        source.Play();
+    }
+
+    private void SetDeathScreen(bool on)
+    {
+        if (deathImage != null) deathImage.SetActive(on);
+        if (deathTextOne != null) deathTextOne.SetActive(on);
+        if (deathTextTwo != null) deathTextTwo.SetActive(on);
     }
 
     private void UpdateHealthUI()
@@ -880,7 +973,7 @@ public class GameManager : MonoBehaviour
                 if (option.standingGuard)
                 {
                     candidateNode = option.node;
-                    score = SpawnSpreadScore(EnemyMoveSystem.NodePos(candidateNode), placedPositions);
+                    score = SpawnSpreadScore(EnemyMoveSystem.NodePos(candidateNode), placedPositions) * guardSpawnPreference;
                 }
                 else
                 {

@@ -77,6 +77,7 @@ public class MissionUI : MonoBehaviour
     private bool pausedStyleOn;
 
     private bool resultsShown;
+    private bool playerDead;
     private bool frozen;
     private float previousTimeScale = 1f;
 
@@ -141,6 +142,10 @@ public class MissionUI : MonoBehaviour
         if (mission == null || root == null)
             return;
 
+        // player is dead: the mission UI and the crosshair stay hidden
+        if (playerDead)
+            return;
+
         if (resultsShown)
         {
             if (Keyboard.current != null &&
@@ -165,6 +170,9 @@ public class MissionUI : MonoBehaviour
 
                 SetText(timerText, mission.GetFormattedTime());
                 SetShown(timerText, true);
+
+                // the crosshair goes away together with the rest of the UI
+                visor.SetCrosshairHidden(true);
 
                 SetShown(stageText, false);
                 SetShown(interactText, false);
@@ -195,6 +203,27 @@ public class MissionUI : MonoBehaviour
         UpdatePausedStyle(state);
         UpdateUpload(state);
         UpdateInteract();
+    }
+
+    /// <summary>
+    /// Called by GameManager when the player's health reaches 0: hides every mission UI element and the crosshair,
+    /// and keeps them hidden (LateUpdate stops touching them).
+    /// </summary>
+    public void HideForDeath()
+    {
+        playerDead = true;
+
+        if (visor == null)
+            visor = GetComponent<VisorHud>();
+
+        SetShown(stageText, false);
+        SetShown(interactText, false);
+        SetShown(timerText, false);
+        SetShown(progressBar, false);
+        SetShown(progressText, false);
+
+        if (visor != null)
+            visor.SetCrosshairHidden(true);
     }
 
     bool UploadCompleteVisible(MissionManager.MissionState state)
@@ -487,6 +516,15 @@ public class MissionUI : MonoBehaviour
             frozen = true;
             previousTimeScale = Time.timeScale;
             Time.timeScale = 0f;
+
+            // all audio pauses too, except the mission voice (so the "mission complete" line is still heard)
+            if (missionVoice != null)
+            {
+                foreach (AudioSource voice in missionVoice.GetComponentsInChildren<AudioSource>(true))
+                    voice.ignoreListenerPause = true;
+            }
+
+            AudioListener.pause = true;
         }
     }
 
@@ -677,7 +715,10 @@ public class MissionUI : MonoBehaviour
     void OnDestroy()
     {
         if (frozen)
+        {
             Time.timeScale = previousTimeScale;
+            AudioListener.pause = false;
+        }
 
         if (root != null)
             Destroy(root.gameObject);

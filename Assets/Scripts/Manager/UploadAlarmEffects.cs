@@ -232,7 +232,8 @@ public class UploadAlarmEffects : MonoBehaviour
             if (l == null) continue;
 
             // Skip baked lights – they can't change at runtime
-            if (l.lightmapBakeType == LightmapBakeType.Baked) continue;
+            // (Light.lightmapBakeType is editor-only; bakingOutput works in builds too)
+            if (l.bakingOutput.lightmapBakeType == LightmapBakeType.Baked) continue;
 
             LightEntry e = new LightEntry();
             e.light = l;
