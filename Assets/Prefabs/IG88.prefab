@@ -1056,6 +1056,20 @@ MonoBehaviour:
   muffledVolume: 0.1
   muffledCutoff: 666
   muffleFadeTime: 0.15
+  errorSound: {fileID: 7833275173259695970}
+  glowSwitchMin: 0.15
+  glowSwitchMax: 0.6
+  blinkOnMin: 0.12
+  blinkOnMax: 0.5
+  blinkOffMin: 0.04
+  blinkOffMax: 0.2
+  blinkDimLevel: 0.03
+  randomShotMin: 0.4
+  randomShotMax: 1.8
+  aimChangeMin: 0.5
+  aimChangeMax: 1.4
+  skipPlayerAngle: 0
+  malfunctionFireLine: 0
 --- !u!136 &2784920271301283989
 CapsuleCollider:
   m_ObjectHideFlags: 0

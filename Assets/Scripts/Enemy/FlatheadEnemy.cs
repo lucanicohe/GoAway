@@ -68,6 +68,12 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
     Vector3 aimPoint;
     Vector3 restForwardLocal = Vector3.forward;   // robot forward in root-local space (never changes)
 
+    // malfunction (virus upload complete)
+    bool malfunctioning, wasMalfunctioning;
+    Transform malfAimTarget;                      // hidden point the turret aims at while malfunctioning (random spots around the robot)
+    float nextMalfAimTime, nextMalfShotTime;
+    const float MalfAimChangeMin = 0.6f, MalfAimChangeMax = 1.8f;   // seconds between two new random turret directions
+
     public FlatheadController Ctrl { get { return ctrl; } }
     public bool IsDead { get; private set; }
 
@@ -109,6 +115,7 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
     void OnDestroy()
     {
         if (gm != null) gm.UnregisterFlathead(this);
+        if (malfAimTarget != null) Destroy(malfAimTarget.gameObject);
     }
 
     /// <summary>Called by the GameManager right after spawning.</summary>
@@ -136,6 +143,8 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
         wasAiming = false;
         wasStriking = false;
         wasUnderAim = false;
+        malfunctioning = false;
+        wasMalfunctioning = false;
         move = new FlatheadMoveSystem(this, gm, startNode);   // puts the robot on its start waypoint
         ready = true;
     }
@@ -174,7 +183,17 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
         // Band 2 (50-100m): ~2 Hz (interval 0.5s)
         // Band 3 (100m+):   ~1 Hz (interval 1.0s)
         float interval = distanceBand == 0 ? 0f : (distanceBand == 1 ? 0.1f : (distanceBand == 2 ? 0.5f : 1.0f));
-        bool playerAimingAt = gm.IsPlayerAimingAt(this);
+        // virus upload complete: the robot malfunctions (Droid Patrol Off still wins: then it stands completely still and does nothing).
+        // The GameManager's Droid Off is on by then, so the FlatheadMoveSystem never alerts / hunts / evades: the robot keeps lurking and patrolling.
+        malfunctioning = MissionManager.EnemiesMalfunctioning && !gm.DroidPatrolOff;
+        if (malfunctioning != wasMalfunctioning)
+        {
+            wasMalfunctioning = malfunctioning;
+            if (malfunctioning) BeginMalfunction();
+            else EndMalfunction();
+        }
+
+        bool playerAimingAt = !malfunctioning && gm.IsPlayerAimingAt(this);
         // Sensing and direct-aim reactions are gameplay-critical, so do not wait for the distance movement interval.
         move.RefreshAwareness(playerAimingAt);
         bool urgentTick = playerAimingAt || move.PlayerAimingAt;
@@ -215,16 +234,93 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
             }
         }
 
-        ctrl.target = gm.FlatheadAimTarget;   // an object that sits on the centre of the player (kept up to date by the GameManager)
+        if (!malfunctioning)
+            ctrl.target = gm.FlatheadAimTarget;   // an object that sits on the centre of the player (kept up to date by the GameManager)
         ctrl.cullVisuals = !isVisibleToCamera && distanceBand > 0 && !hunting;   // a hunting turret always keeps aiming
+        if (malfunctioning) UpdateMalfunction();  // random turret directions + slow random shots (not aimed at the player, but they can hit him) instead of aiming at him
 
         if (gm.Player != null) aimPoint = gm.PlayerAimPoint;
 
         // The current hunter shoots while striking; any Flathead can also shoot while the player has it lined up.
-        if (!gm.DroidPatrolOff) UpdateFiring();
+        if (!malfunctioning && !gm.DroidPatrolOff) UpdateFiring();
 
         // Nonessential audio muffle raycasts suspended when far away (>50m), same as the IG-88
         if (hunting || distanceBand < 2) UpdateSoundMuffle(dt);
+    }
+
+    // ------------------------------------------------------------------ malfunction (after the virus upload)
+
+    void BeginMalfunction()
+    {
+        ctrl.ApplyNormalMaterial();   // stealth material -> Normal Material (set on the FlatheadController) on every mesh of the robot
+        nextMalfAimTime = 0f;
+        nextMalfShotTime = Time.time + Random.Range(0.5f, 1.5f);
+    }
+
+    // only happens when Droid Patrol Off is switched on while playing
+    void EndMalfunction()
+    {
+        wasAiming = false;
+        ctrl.aimAtTarget = false;
+    }
+
+    // The turret swings onto random spots around the robot and a bolt leaves the gun now and then, slowly (Malfunction Shot Min / Max
+    // on the FlatheadController), along wherever the gun really points. Its bolts are normal bolts: they hurt the player if they happen to hit him
+    // (Skip Player Angle on the FlatheadController can hold shots back near him).
+    void UpdateMalfunction()
+    {
+        if (ctrl.cullVisuals || !ctrl.IsReady) return;   // off screen and far away: the turret isn't animated and nobody sees it
+
+        if (malfAimTarget == null)
+            malfAimTarget = new GameObject("Flathead Malfunction Aim").transform;
+        ctrl.target = malfAimTarget;
+        ctrl.aimAtTarget = true;
+
+        if (Time.time >= nextMalfAimTime)
+        {
+            nextMalfAimTime = Time.time + Random.Range(MalfAimChangeMin, MalfAimChangeMax);
+            malfAimTarget.position = ctrl.TurretPosition + RandomAimDirection() * 6f;
+        }
+
+        if (Time.time < nextMalfShotTime) return;
+
+        Vector3 origin = ctrl.MuzzlePosition;
+        Vector3 dir = ctrl.GunDirection;
+        if (PointsAtPlayer(origin, dir))
+        {
+            nextMalfShotTime = Time.time + 0.2f;   // Skip Player Angle is on and the gun points at the player: shoot a moment later
+            return;
+        }
+
+        nextMalfShotTime = Time.time + Random.Range(ctrl.malfunctionShotMin, Mathf.Max(ctrl.malfunctionShotMin, ctrl.malfunctionShotMax));
+        gm.FireFlatheadBolt(origin, dir);
+        ctrl.PlayFireSound();
+    }
+
+    // random direction on the room side of the surface the robot stands on (wall or ceiling), inside the turret's tilt range
+    Vector3 RandomAimDirection()
+    {
+        Vector3 up = transform.up;      // points away from the robot's feet: into the room
+        Vector3 fwd = ctrl.Forward;
+        Vector3 origin = ctrl.TurretPosition;
+        Vector3 dir = fwd;
+        for (int i = 0; i < 8; i++)
+        {
+            float yaw = Random.Range(-180f, 180f);
+            float elev = Random.Range(-5f, 75f) * Mathf.Deg2Rad;
+            Vector3 h = Quaternion.AngleAxis(yaw, up) * fwd;
+            dir = (h * Mathf.Cos(elev) + up * Mathf.Sin(elev)).normalized;
+            if (!PointsAtPlayer(origin, dir)) break;
+        }
+        return dir;
+    }
+
+    bool PointsAtPlayer(Vector3 origin, Vector3 dir)
+    {
+        if (ctrl.skipPlayerAngle <= 0f || gm.Player == null) return false;
+        Vector3 toPlayer = gm.PlayerAimPoint - origin;
+        if (toPlayer.sqrMagnitude < 0.01f) return false;
+        return Vector3.Angle(dir, toPlayer) < ctrl.skipPlayerAngle;
     }
 
     // ------------------------------------------------------------------ shooting (strike burst or defensive fire while moving)
@@ -341,6 +437,7 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
         IsDead = true;
         ready = false;
         HasLanding = false;
+        if (malfAimTarget != null) Destroy(malfAimTarget.gameObject);
         ctrl.walking = false;
         ctrl.jump = false;
         ctrl.aimAtTarget = false;

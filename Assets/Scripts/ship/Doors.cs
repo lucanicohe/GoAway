@@ -1,13 +1,25 @@
+
 using System.Collections;
 using UnityEngine;
 
 public class Doors : MonoBehaviour, IBlasterDamageable
 {
+    public enum DoorType
+    {
+        Normal,
+        MissionStart,
+        Extraction
+    }
+
+    [Header("Mission Settings")]
+    public DoorType doorType = DoorType.Normal;
+
+    [Header("Door References")]
     public Transform leftDoor;
     public Transform rightDoor;
     public float duration = 1f;
 
-    [Header("Local Y positions (defaults = your old values)")]
+    [Header("Local Y positions")]
     public float leftClosedY = 0.229f;
     public float leftOpenY = 0.24009f;
     public float rightClosedY = 0.21098f;
@@ -20,9 +32,9 @@ public class Doors : MonoBehaviour, IBlasterDamageable
         opened = false;
 
         if (leftDoor == null || rightDoor == null)
-            Debug.LogWarning("[Doors] Left Door or Right Door is empty on \"" + name + "\". Assign both in the Inspector.", this);
+            Debug.LogWarning("[Doors] Missing door references on " + name, this);
         else
-            Debug.Log("[Doors] ready on \"" + name + "\" -> left: \"" + leftDoor.name + "\", right: \"" + rightDoor.name + "\"", this);
+            Debug.Log("[Doors] Ready on " + name, this);
 
         if (leftDoor != null)
         {
@@ -42,7 +54,9 @@ public class Doors : MonoBehaviour, IBlasterDamageable
     public void TakeBlasterDamage(BlasterHitInfo hit)
     {
         if (opened) return;
-        Debug.Log("[Doors] \"" + name + "\" was shot.", this);
+
+        Debug.Log("[Doors] " + name + " was shot.", this);
+
         Open();
     }
 
@@ -51,9 +65,10 @@ public class Doors : MonoBehaviour, IBlasterDamageable
     {
         if (!Application.isPlaying)
         {
-            Debug.Log("[Doors] Press Play first, then use the test.", this);
+            Debug.Log("[Doors] Press Play first.", this);
             return;
         }
+
         Open();
     }
 
@@ -63,13 +78,39 @@ public class Doors : MonoBehaviour, IBlasterDamageable
 
         if (leftDoor == null || rightDoor == null)
         {
-            Debug.LogWarning("[Doors] Left Door or Right Door is empty on \"" + name + "\".", this);
+            Debug.LogWarning("[Doors] Missing door references.", this);
             return;
         }
 
+        // Mission-related doors require a MissionManager.
+        if (doorType != DoorType.Normal &&
+            MissionManager.Instance == null)
+        {
+            Debug.LogWarning("[Doors] MissionManager not found.", this);
+            return;
+        }
+
+        // Prevent extraction before the upload is complete.
+        if (doorType == DoorType.Extraction)
+        {
+            if (!MissionManager.Instance.UploadCompleted)
+            {
+                Debug.Log("[Doors] Exit locked. Complete virus upload first.", this);
+                return;
+            }
+        }
+
         opened = true;
+
+        // Start the timer as the first door begins opening.
+        if (doorType == DoorType.MissionStart)
+        {
+            MissionManager.Instance.StartMission();
+        }
+
         Report(leftDoor);
         Report(rightDoor);
+
         StartCoroutine(Move());
     }
 
@@ -77,6 +118,7 @@ public class Doors : MonoBehaviour, IBlasterDamageable
     {
         Animator anim = leaf.GetComponentInParent<Animator>();
         Renderer r = leaf.GetComponentInChildren<Renderer>();
+
         Debug.Log("[Doors] " + leaf.name
             + ": renderer=" + (r != null ? r.name : "NONE")
             + ", partOfStaticBatch=" + (r != null && r.isPartOfStaticBatch)
@@ -96,18 +138,26 @@ public class Doors : MonoBehaviour, IBlasterDamageable
         rightEnd.y = rightOpenY;
 
         float t = 0f;
+
         while (t < 1f)
         {
-            t += Time.deltaTime / duration;
-            leftDoor.localPosition = Vector3.Lerp(leftStart, leftEnd, t);
-            rightDoor.localPosition = Vector3.Lerp(rightStart, rightEnd, t);
+            t += Time.deltaTime / Mathf.Max(duration, 0.001f);
+
+            leftDoor.localPosition =
+                Vector3.Lerp(leftStart, leftEnd, t);
+
+            rightDoor.localPosition =
+                Vector3.Lerp(rightStart, rightEnd, t);
+
             yield return null;
         }
 
-        // one frame later: did something move the leaves back?
         yield return null;
-        Debug.Log("[Doors] after opening: left local y = " + leftDoor.localPosition.y.ToString("F4")
-            + " (wanted " + leftOpenY + "), right local y = " + rightDoor.localPosition.y.ToString("F4")
+
+        Debug.Log("[Doors] after opening: left local y = "
+            + leftDoor.localPosition.y.ToString("F4")
+            + " (wanted " + leftOpenY + "), right local y = "
+            + rightDoor.localPosition.y.ToString("F4")
             + " (wanted " + rightOpenY + ")", this);
     }
 }

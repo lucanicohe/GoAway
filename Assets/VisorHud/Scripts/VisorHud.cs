@@ -129,6 +129,7 @@ public class VisorHud : MonoBehaviour
     float prevShownHealth = -1f, prevShownAmmo = -1f;
     int lastHealthNumber = -9999, lastAmmoNumber = -9999;
     bool staticVisualsDirty = true;
+    bool crosshairHidden;
     float lastYaw;
 
     public float Health { get { return health; } set { health = Mathf.Clamp01(value); } }
@@ -138,6 +139,14 @@ public class VisorHud : MonoBehaviour
 
     /// <summary>Marks static HUD visuals dirty so they get refreshed on the next frame.</summary>
     public void MarkVisualsDirty() { staticVisualsDirty = true; }
+
+    /// <summary>Hides the crosshair while something else (e.g. an interact prompt) takes its place. Pass false to bring it back.</summary>
+    public void SetCrosshairHidden(bool hidden)
+    {
+        if (crosshairHidden == hidden) return;
+        crosshairHidden = hidden;
+        Show(crosshair, showCrosshair && !crosshairHidden);
+    }
 
     /// <summary>Compass bearing in degrees (0 = North, 90 = East, 180 = South, 270 = West).</summary>
     public float Heading { get { return Mathf.Repeat(ReadYaw() - northOffset, 360f); } }
@@ -487,7 +496,7 @@ public class VisorHud : MonoBehaviour
         Show(rightPanel, showBottomPanels);
         Show(healthBar, showBars);
         Show(ammoBar, showBars);
-        Show(crosshair, showCrosshair);
+        Show(crosshair, showCrosshair && !crosshairHidden);
 
         Paint(topBodyImage, topVisorMetal);
         Paint(topEdgeImage, topVisorEdgeLine);

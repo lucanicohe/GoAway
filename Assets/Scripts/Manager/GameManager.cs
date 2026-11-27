@@ -373,7 +373,8 @@ public class GameManager : MonoBehaviour
 
     // ---------- public read-only values used by the droids ----------
     public float DroidHealth => droidHealth;
-    public bool DroidOff => droidOff;
+    // Droid Off (Inspector switch) OR the virus upload is complete: the droids and Flatheads malfunction: they stop detecting / chasing / aiming at the player (their random stray bolts still hurt)
+    public bool DroidOff => droidOff || MissionManager.EnemiesMalfunctioning;
     public bool DroidPatrolOff => droidPatrolOff;
     public float HeadHitMargin => headHitMargin;
     public float DetectionRadius => detectionRadius;
@@ -1431,7 +1432,7 @@ public class GameManager : MonoBehaviour
 
         if (Time.time < nextFlatheadHunterTime) return;
         Transform p = Player;
-        if (p == null || !PlayerAlive || droidOff || droidPatrolOff) return;
+        if (p == null || !PlayerAlive || DroidOff || droidPatrolOff) return;
         if (!FlatheadsAlerted) return;   // nobody has seen or sensed the player lately: they all just lurk
 
         FlatheadEnemy best = null;
@@ -1452,7 +1453,7 @@ public class GameManager : MonoBehaviour
     /// <summary>True when the player's center-screen shot ray hits this Flathead. Cached so all Flatheads share one raycast per frame.</summary>
     public bool IsPlayerAimingAt(FlatheadEnemy target)
     {
-        if (target == null || droidOff || droidPatrolOff || !PlayerAlive)
+        if (target == null || DroidOff || droidPatrolOff || !PlayerAlive)
             return false;
 
         if (flatheadAimCacheFrame != Time.frameCount)

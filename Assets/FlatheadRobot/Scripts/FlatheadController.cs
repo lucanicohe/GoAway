@@ -65,6 +65,16 @@ namespace FlatheadRobotKit
         [Tooltip("Destruction sound. Plays once when the robot dies (the noise and walking sounds stop at that moment). Untick 'Play On Awake' on the AudioSource.")]
         public AudioSource destructionSource;
 
+        [Header("Malfunction (starts the moment the virus upload is complete)")]
+        [Tooltip("Drag the NORMAL (non-stealth) material here. When the virus upload is complete, every mesh of the robot (all its material slots) switches from the stealth material to this one. Empty = no material change.")]
+        public Material normalMaterial;
+        [Tooltip("The robot shoots slowly and randomly while it malfunctions. Seconds between two shots = a random time between these two values.")]
+        [Min(0.5f)] public float malfunctionShotMin = 1.5f;
+        [Min(0.5f)] public float malfunctionShotMax = 4f;
+        [Tooltip("0 = total chaos: the robot shoots wherever its gun happens to point, the player included (its bolts hurt like normal bolts). " +
+                 "Above 0: a shot is held back while the gun points within this many degrees of the player, which makes the stray fire safer.")]
+        [Range(0f, 90f)] public float skipPlayerAngle = 0f;
+
         [Header("Sounds through walls")]
         [Tooltip("When a wall is between the robot and the player (the camera), all its sounds get quieter and muffled.")]
         public bool muffleThroughWalls = true;
@@ -300,6 +310,26 @@ namespace FlatheadRobotKit
 
             if (moveWhileWalking && walkW > 0f && jw == 0f)
                 transform.position += transform.TransformDirection(d3) * (WalkSpeed * walkW * dt);
+        }
+
+        /// <summary>Puts the Normal Material on every mesh of the robot (all material slots). Called once by the FlatheadEnemy when the robots malfunction.</summary>
+        public void ApplyNormalMaterial()
+        {
+            if (normalMaterial == null)
+            {
+                Debug.LogWarning("FlatheadController: no Normal Material is assigned on the Flathead prefab, so this robot keeps its stealth material after the virus upload.", this);
+                return;
+            }
+            Renderer[] rs = GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < rs.Length; i++)
+            {
+                Renderer r = rs[i];
+                if (!(r is MeshRenderer) && !(r is SkinnedMeshRenderer)) continue;   // not particles, trails, lines
+                int slots = r.sharedMaterials.Length;
+                Material[] mats = new Material[slots];
+                for (int k = 0; k < slots; k++) mats[k] = normalMaterial;
+                r.sharedMaterials = mats;
+            }
         }
 
         // ------------------------------------------------------------------ sound
