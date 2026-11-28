@@ -51,8 +51,8 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
     public float spinForce = 4f;
     [Tooltip("Size of the collider of pieces that have no child bone, in metres.")]
     [Range(0.05f, 0.4f)] public float leafPieceSize = 0.12f;
-    [Tooltip("Seconds until the pieces disappear. 0 = they stay on the ground forever.")]
-    public float debrisLifetime = 0f;
+    [Tooltip("Seconds the pieces stay on the ground after the robot is destroyed. Then the pieces and the robot are removed from the scene. 0 = they stay forever.")]
+    [Min(0f)] public float despawnDelay = 3f;
 
     FlatheadController ctrl;
     GameManager gm;
@@ -504,6 +504,10 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
     /// <summary>Every rigged part (turret, body, legs ...) is cut loose and becomes a falling rigidbody.</summary>
     void BreakApart(Vector3 hitPoint, Vector3 hitDirection)
     {
+        // despawn: after the delay the leftover root object goes too (scheduled first, so it also happens if no pieces are found below)
+        if (despawnDelay > 0f)
+            Destroy(gameObject, despawnDelay);
+
         // old colliders (the hit box) would fight with the pieces
         Collider[] oldCols = GetComponentsInChildren<Collider>(true);
         for (int i = 0; i < oldCols.Length; i++) oldCols[i].enabled = false;
@@ -558,10 +562,7 @@ public class FlatheadEnemy : MonoBehaviour, EnemyCullingManager.ICullableTarget
             for (int j = i + 1; j < boxes.Length; j++)
                 Physics.IgnoreCollision(boxes[i], boxes[j]);
 
-        if (debrisLifetime > 0f)
-        {
-            Destroy(debris.gameObject, debrisLifetime);
-            Destroy(gameObject, debrisLifetime);
-        }
+        if (despawnDelay > 0f)
+            Destroy(debris.gameObject, despawnDelay);
     }
 }

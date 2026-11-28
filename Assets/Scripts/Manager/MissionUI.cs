@@ -581,7 +581,8 @@ public class MissionUI : MonoBehaviour
                 control.enabled = false;
         }
 
-        if (pauseOnCompletion && !frozen)
+        // With an ExtractionSequence in the scene the game keeps running and the sequence fades the sound itself.
+        if (pauseOnCompletion && !frozen && ExtractionSequence.Instance == null)
         {
             frozen = true;
             previousTimeScale = Time.timeScale;

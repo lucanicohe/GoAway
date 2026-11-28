@@ -2,7 +2,8 @@ using UnityEngine;
 
 /// <summary>
 /// Put this on the trigger collider behind the end door.
-/// When the player walks in, the mission is completed: the timer stops and MissionUI shows it.
+/// When the player walks in, the mission is completed: the timer stops and MissionUI shows it,
+/// and the ending (ExtractionSequence: outside camera, escape pod, sound fade) starts.
 /// It only counts after the virus upload is done (MissionManager checks that).
 /// </summary>
 [RequireComponent(typeof(Collider))]
@@ -42,6 +43,10 @@ public class ExtractionZone : MonoBehaviour
             return;
 
         MissionManager.Instance.CompleteMission();
+
+        // Controls off, outside camera, escape pod, sound fade (does nothing if the mission was not completed).
+        if (ExtractionSequence.Instance != null)
+            ExtractionSequence.Instance.Begin();
 
         Debug.Log("[Extraction] Player reached the last room.", this);
     }
