@@ -1,4 +1,3 @@
-
 using System.Collections;
 using UnityEngine;
 
@@ -18,6 +17,12 @@ public class Doors : MonoBehaviour, IBlasterDamageable
     public Transform leftDoor;
     public Transform rightDoor;
     public float duration = 1f;
+
+    [Header("Door Sounds (drag in AudioSources that already have their clip)")]
+    [Tooltip("Plays once when the left door starts opening. Put the AudioSource on the left door so the sound comes from the door itself. 'Play On Awake' should be off.")]
+    public AudioSource leftDoorSound;
+    [Tooltip("Plays once when the right door starts opening. Put the AudioSource on the right door so the sound comes from the door itself. 'Play On Awake' should be off.")]
+    public AudioSource rightDoorSound;
 
     [Header("Local Y positions")]
     public float leftClosedY = 0.229f;
@@ -108,10 +113,31 @@ public class Doors : MonoBehaviour, IBlasterDamageable
             MissionManager.Instance.StartMission();
         }
 
+        PlayDoorSounds();
+
         Report(leftDoor);
         Report(rightDoor);
 
         StartCoroutine(Move());
+    }
+
+    // Each of the two doors plays its own sound once.
+    // If both slots hold the same AudioSource it still only plays once.
+    void PlayDoorSounds()
+    {
+        PlayOnce(leftDoorSound);
+
+        if (rightDoorSound != leftDoorSound)
+            PlayOnce(rightDoorSound);
+    }
+
+    static void PlayOnce(AudioSource source)
+    {
+        if (source == null || source.clip == null)
+            return;
+
+        source.loop = false;
+        source.Play();
     }
 
     void Report(Transform leaf)

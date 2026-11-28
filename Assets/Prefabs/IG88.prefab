@@ -208,7 +208,7 @@ AudioSource:
   Priority: 128
   DopplerLevel: 1
   MinDistance: 1
-  MaxDistance: 15
+  MaxDistance: 33
   Pan2D: 0
   rolloffMode: 1
   BypassEffects: 0
@@ -641,7 +641,7 @@ AudioSource:
   Priority: 128
   DopplerLevel: 1
   MinDistance: 1
-  MaxDistance: 15
+  MaxDistance: 33
   Pan2D: 0
   rolloffMode: 1
   BypassEffects: 0
@@ -947,7 +947,7 @@ AudioSource:
   Priority: 128
   DopplerLevel: 1
   MinDistance: 1
-  MaxDistance: 15
+  MaxDistance: 33
   Pan2D: 0
   rolloffMode: 1
   BypassEffects: 0
@@ -1181,7 +1181,7 @@ MonoBehaviour:
   scatterForce: 3
   spinForce: 4
   leafPieceSize: 0.12
-  debrisLifetime: 0
+  despawnDelay: 3
   chaseLight: {fileID: 3115129910247020234}
   thighSwing: 26
   kneeBend: 38
